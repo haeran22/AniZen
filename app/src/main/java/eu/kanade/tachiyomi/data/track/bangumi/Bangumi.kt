@@ -122,6 +122,7 @@ class Bangumi(id: Long) : BaseTracker(id, "Bangumi"), AnimeTracker {
             saveCredentials(oauth.userId.toString(), oauth.accessToken)
         } catch (e: Throwable) {
             logout()
+            throw e
         }
     }
 
