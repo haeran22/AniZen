@@ -15,6 +15,7 @@ import eu.kanade.tachiyomi.network.parseAs
 import kotlinx.serialization.json.Json
 import okhttp3.CacheControl
 import okhttp3.FormBody
+import okhttp3.Headers
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import tachiyomi.core.common.util.lang.withIOContext
@@ -30,7 +31,15 @@ class BangumiApi(
 
     private val json: Json by injectLazy()
 
-    private val authClient = client.newBuilder().addInterceptor(interceptor).build()
+    private val authClient = client.newBuilder()
+        .addInterceptor(interceptor)
+        .addInterceptor { chain ->
+            val request = chain.request().newBuilder()
+                .header("User-Agent", USER_AGENT)
+                .build()
+            chain.proceed(request)
+        }
+        .build()
 
     suspend fun addLibAnime(track: Track): Track {
         return withIOContext {
@@ -113,7 +122,6 @@ class BangumiApi(
                 .get()
                 .build()
 
-            // TODO: get user readed chapter here
             with(json) {
                 authClient.newCall(requestUserRead)
                     .awaitSuccess()
@@ -142,6 +150,10 @@ class BangumiApi(
 
     private fun accessTokenRequest(code: String) = POST(
         OAUTH_URL,
+        headers = Headers.Builder()
+            .add("User-Agent", USER_AGENT)
+            .add("Accept", "application/json")
+            .build(),
         body = FormBody.Builder()
             .add("grant_type", "authorization_code")
             .add("client_id", CLIENT_ID)
@@ -154,6 +166,7 @@ class BangumiApi(
     companion object {
         private const val CLIENT_ID = "bgm76146b033ec124b23"
         private const val CLIENT_SECRET = "7efa2da797ce858665f2c070d9d0f6f5"
+        private const val USER_AGENT = "haeran22/AniZen/1.0 (https://github.com)"
 
         private const val API_URL = "https://api.bgm.tv"
         private const val OAUTH_URL = "https://bgm.tv/oauth/access_token"
@@ -170,6 +183,10 @@ class BangumiApi(
 
         fun refreshTokenRequest(token: String) = POST(
             OAUTH_URL,
+            headers = Headers.Builder()
+                .add("User-Agent", USER_AGENT)
+                .add("Accept", "application/json")
+                .build(),
             body = FormBody.Builder()
                 .add("grant_type", "refresh_token")
                 .add("client_id", CLIENT_ID)
