@@ -15,7 +15,6 @@ import eu.kanade.tachiyomi.network.parseAs
 import kotlinx.serialization.json.Json
 import okhttp3.CacheControl
 import okhttp3.FormBody
-import okhttp3.Headers
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -142,11 +141,12 @@ class BangumiApi(
 
     suspend fun accessToken(code: String): BGMOAuth {
         return withIOContext {
-            with(json) {
-                client.newCall(accessTokenRequest(code))
-                    .awaitSuccess()
-                    .parseAs()
+            val response = client.newCall(accessTokenRequest(code)).execute()
+            val bodyString = response.body.string()
+            if (!response.isSuccessful) {
+                throw Exception("Bangumi HTTP ${response.code}: $bodyString")
             }
+            json.decodeFromString<BGMOAuth>(bodyString)
         }
     }
 
@@ -161,14 +161,12 @@ class BangumiApi(
             }
         """.trimIndent()
 
-        return POST(
-            OAUTH_URL,
-            headers = Headers.Builder()
-                .add("User-Agent", USER_AGENT)
-                .add("Accept", "application/json")
-                .build(),
-            body = jsonBody.toRequestBody("application/json; charset=utf-8".toMediaType()),
-        )
+        return Request.Builder()
+            .url(OAUTH_URL)
+            .header("User-Agent", USER_AGENT)
+            .header("Accept", "application/json")
+            .post(jsonBody.toRequestBody("application/json; charset=utf-8".toMediaType()))
+            .build()
     }
 
     companion object {
@@ -200,14 +198,12 @@ class BangumiApi(
                 }
             """.trimIndent()
 
-            return POST(
-                OAUTH_URL,
-                headers = Headers.Builder()
-                    .add("User-Agent", USER_AGENT)
-                    .add("Accept", "application/json")
-                    .build(),
-                body = jsonBody.toRequestBody("application/json; charset=utf-8".toMediaType()),
-            )
+            return Request.Builder()
+                .url(OAUTH_URL)
+                .header("User-Agent", USER_AGENT)
+                .header("Accept", "application/json")
+                .post(jsonBody.toRequestBody("application/json; charset=utf-8".toMediaType()))
+                .build()
         }
     }
 }
