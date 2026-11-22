@@ -16,8 +16,10 @@ import kotlinx.serialization.json.Json
 import okhttp3.CacheControl
 import okhttp3.FormBody
 import okhttp3.Headers
+import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
 import tachiyomi.core.common.util.lang.withIOContext
 import uy.kohesive.injekt.injectLazy
 import java.net.URLEncoder
@@ -148,29 +150,35 @@ class BangumiApi(
         }
     }
 
-    private fun accessTokenRequest(code: String) = POST(
-        OAUTH_URL,
-        headers = Headers.Builder()
-            .add("User-Agent", USER_AGENT)
-            .add("Accept", "application/json")
-            .build(),
-        body = FormBody.Builder()
-            .add("grant_type", "authorization_code")
-            .add("client_id", CLIENT_ID)
-            .add("client_secret", CLIENT_SECRET)
-            .add("code", code)
-            .add("redirect_uri", REDIRECT_URL)
-            .build(),
-    )
+    private fun accessTokenRequest(code: String): Request {
+        val jsonBody = """
+            {
+                "grant_type": "authorization_code",
+                "client_id": "$CLIENT_ID",
+                "client_secret": "$CLIENT_SECRET",
+                "code": "$code",
+                "redirect_uri": "$REDIRECT_URL"
+            }
+        """.trimIndent()
+
+        return POST(
+            OAUTH_URL,
+            headers = Headers.Builder()
+                .add("User-Agent", USER_AGENT)
+                .add("Accept", "application/json")
+                .build(),
+            body = jsonBody.toRequestBody("application/json; charset=utf-8".toMediaType()),
+        )
+    }
 
     companion object {
         private const val CLIENT_ID = "bgm76146b033ec124b23"
         private const val CLIENT_SECRET = "7efa2da797ce858665f2c070d9d0f6f5"
         private const val USER_AGENT = "haeran22/AniZen/1.0 (https://github.com)"
 
-        private const val API_URL = "https://api.bgm.tv"
-        private const val OAUTH_URL = "https://bgm.tv/oauth/access_token"
-        private const val LOGIN_URL = "https://bgm.tv/oauth/authorize"
+        private const val API_URL = "https://bgm.tv"
+        private const val OAUTH_URL = "https://bgm.tv"
+        private const val LOGIN_URL = "https://bgm.tv"
 
         private const val REDIRECT_URL = "anizen://bangumi-auth"
 
@@ -181,19 +189,25 @@ class BangumiApi(
                 .appendQueryParameter("redirect_uri", REDIRECT_URL)
                 .build()
 
-        fun refreshTokenRequest(token: String) = POST(
-            OAUTH_URL,
-            headers = Headers.Builder()
-                .add("User-Agent", USER_AGENT)
-                .add("Accept", "application/json")
-                .build(),
-            body = FormBody.Builder()
-                .add("grant_type", "refresh_token")
-                .add("client_id", CLIENT_ID)
-                .add("client_secret", CLIENT_SECRET)
-                .add("refresh_token", token)
-                .add("redirect_uri", REDIRECT_URL)
-                .build(),
-        )
+        fun refreshTokenRequest(token: String): Request {
+            val jsonBody = """
+                {
+                    "grant_type": "refresh_token",
+                    "client_id": "$CLIENT_ID",
+                    "client_secret": "$CLIENT_SECRET",
+                    "refresh_token": "$token",
+                    "redirect_uri": "$REDIRECT_URL"
+                }
+            """.trimIndent()
+
+            return POST(
+                OAUTH_URL,
+                headers = Headers.Builder()
+                    .add("User-Agent", USER_AGENT)
+                    .add("Accept", "application/json")
+                    .build(),
+                body = jsonBody.toRequestBody("application/json; charset=utf-8".toMediaType()),
+            )
+        }
     }
 }
