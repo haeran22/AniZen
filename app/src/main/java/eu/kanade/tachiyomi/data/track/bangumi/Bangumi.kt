@@ -7,6 +7,7 @@ import eu.kanade.tachiyomi.data.database.models.Track
 import eu.kanade.tachiyomi.data.track.AnimeTracker
 import eu.kanade.tachiyomi.data.track.BaseTracker
 import eu.kanade.tachiyomi.data.track.bangumi.dto.BGMOAuth
+import eu.kanade.tachiyomi.data.track.model.TrackMangaMetadata
 import eu.kanade.tachiyomi.data.track.model.TrackSearch
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.toImmutableList
@@ -81,6 +82,10 @@ class Bangumi(id: Long) : BaseTracker(id, "Bangumi"), AnimeTracker {
         return api.searchAnime(query)
     }
 
+    override suspend fun getMangaMetadata(track: DomainAnimeTrack): TrackMangaMetadata {
+        return api.getAnimeMetadata(track)
+    }
+
     override suspend fun refresh(track: Track): Track {
         val remoteStatusTrack = api.statusLibAnime(track) ?: throw Exception("Could not find anime")
         track.copyPersonalFrom(remoteStatusTrack)
@@ -120,9 +125,8 @@ class Bangumi(id: Long) : BaseTracker(id, "Bangumi"), AnimeTracker {
             val oauth = api.accessToken(code)
             interceptor.newAuth(oauth)
             saveCredentials(oauth.userId.toString(), oauth.accessToken)
-        } catch (e: Throwable) {
+        } catch (_: Throwable) {
             logout()
-            throw e
         }
     }
 
@@ -133,7 +137,7 @@ class Bangumi(id: Long) : BaseTracker(id, "Bangumi"), AnimeTracker {
     fun restoreToken(): BGMOAuth? {
         return try {
             json.decodeFromString<BGMOAuth>(trackPreferences.trackToken(this).get())
-        } catch (e: Exception) {
+        } catch (_: Exception) {
             null
         }
     }
