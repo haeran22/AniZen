@@ -2158,16 +2158,19 @@ class AnimeScreenModel(
         }
     }
 
-    private fun observeMergedAnime() {
+     private fun observeMergedAnime() {
         screenModelScope.launchIO {
             getMergedAnimeById.subscribe(animeId)
                 .onEach { mergedAnime ->
-                    val sources = mergedAnime.map { sourceManager.getOrStub(it.source) }
+                    val sources = mergedAnime
+                        .filter { it.source != exh.source.MERGED_SOURCE_ID }
+                        .map { sourceManager.getOrStub(it.source) }
                     updateSuccessState { it.copySuccess(mergedSources = sources.toImmutableList()) }
                 }
                 .launchIn(screenModelScope)
         }
     }
+
 
     private suspend fun updateAiringTime(anime: Anime, trackItems: List<TrackItem>, manualFetch: Boolean) {
         val airingEpisodeData = AniChartApi().loadAiringTime(anime, trackItems, manualFetch)
