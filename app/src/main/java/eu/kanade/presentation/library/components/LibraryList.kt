@@ -101,7 +101,18 @@ internal fun LibraryList(
                                 showLanguageIcon = libraryItem.showLanguageIcon,
                             )
                             if (libraryItem.showSourceIcon) {
-                                SourceIconBadge(source = libraryItem.domainSource)
+                        domainSource = sources.find { it.first.id == mangaWithFolder.anime.source }?.first
+                            ?: if (mangaWithFolder.anime.source == exh.source.MERGED_SOURCE_ID) {
+                                tachiyomi.domain.source.model.Source(
+                                    id = exh.source.MERGED_SOURCE_ID,
+                                    lang = "all",
+                                    name = "Merged",
+                                    supportsLatest = false,
+                                    isStub = false,
+                                )
+                            } else {
+                                null
+                            },
                             }
                         },
                         onLongClick = { onLongClick(libraryItem.libraryAnime) },
