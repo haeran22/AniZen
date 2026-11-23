@@ -64,7 +64,7 @@ class AndroidSourceManager(
             }.collectLatest { (extensions, isExtensionManagerInitialized) ->
                 if (!isExtensionManagerInitialized) return@collectLatest
 
-                val mutableMap = ConcurrentHashMap<Long, Source>(
+                                val mutableMap = ConcurrentHashMap<Long, Source>(
                     mapOf(
                         LocalAnimeSource.ID to LocalAnimeSource(
                             context,
@@ -72,8 +72,10 @@ class AndroidSourceManager(
                             Injekt.get(),
                             Injekt.get(),
                         ),
+                        exh.source.MERGED_SOURCE_ID to exh.source.MergedAnimeSource(),
                     ),
                 )
+
                 extensions.forEach { extension: eu.kanade.tachiyomi.extension.model.Extension.Installed ->
                     extension.sources.forEach {
                         mutableMap[it.id] = it
