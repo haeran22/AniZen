@@ -150,7 +150,7 @@ class DownloadManager(
      * @param autoStart whether to start the downloader after enqueuing the episodes.
      * @param alt whether to use the alternative downloader
      */
-    fun downloadEpisodes(
+       fun downloadEpisodes(
         anime: Anime,
         episodes: List<Episode>,
         autoStart: Boolean = true,
@@ -159,6 +159,14 @@ class DownloadManager(
     ) {
         // AM (FILLERMARK) -->
         val filteredEpisodes = getEpisodesToDownload(episodes)
+        if (anime.source == exh.source.MERGED_SOURCE_ID) {
+            val getAnime = uy.kohesive.injekt.Injekt.get<tachiyomi.domain.anime.interactor.GetAnime>()
+            filteredEpisodes.groupBy { it.animeId }.forEach { (realAnimeId, realEpisodes) ->
+                val realAnime = kotlinx.coroutines.runBlocking { getAnime.await(realAnimeId) } ?: return@forEach
+                downloader.queueEpisodes(realAnime, realEpisodes, autoStart, alt, video)
+            }
+            return
+        }
         downloader.queueEpisodes(anime, filteredEpisodes, autoStart, alt, video)
         // <-- AM (FILLERMARK)
     }
