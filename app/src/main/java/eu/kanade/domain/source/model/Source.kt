@@ -19,8 +19,8 @@ private val iconBitmapCache = java.util.concurrent.ConcurrentHashMap<Long, Any>(
 val Source.icon: ImageBitmap?
     get() {
         val cached = iconBitmapCache.getOrPut(id) {
-            val drawable = if (id == MERGED_SOURCE_ID) {
-                ContextCompat.getDrawable(Injekt.get<Context>(), R.mipmap.ic_launcher)
+                        val drawable = if (id == MERGED_SOURCE_ID) {
+                ContextCompat.getDrawable(Injekt.get<Context>(), R.drawable.ic_splash_logo_raw)
             } else {
                 Injekt.get<ExtensionManager>().getAppIconForSource(id)
             }
