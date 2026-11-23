@@ -149,9 +149,9 @@ class BangumiApi(
                         .awaitSuccess()
                         .parseAs<BGMSubject>()
                         .let { anime ->
-                            val imageUrl = anime.images?.large?.takeIf { it.isNotBlank() }
-                                ?: anime.images?.medium?.takeIf { it.isNotBlank() }
-                                ?: anime.images?.common?.takeIf { it.isNotBlank() }
+                        val imageUrl = anime.images?.large?.ifEmpty { null }
+                            ?: anime.images?.medium?.ifEmpty { null }
+                            ?: anime.images?.common?.ifEmpty { null }
 
                             val author = anime.infobox
                                 .filter {
