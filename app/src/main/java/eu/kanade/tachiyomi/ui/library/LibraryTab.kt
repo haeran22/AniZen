@@ -243,8 +243,8 @@ data object LibraryTab : Tab {
                             screenModel.clearSelection()
                             navigator.push(MigrationConfigScreen(animeIds))
                         },
-                        onMergeClicked = {
-                            // TODO: Implement bulk merge? For now just show for single
+                                               onMergeClicked = {
+                            screenModel.mergeSelectedAnimes()
                         },
                         onSelectionUpdateClicked = {
                             screenModel.updateSelection()
