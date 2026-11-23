@@ -473,7 +473,7 @@ fun PlayerControls(
                 }
 
                 AnimatedVisibility(
-                    visible = (controlsShown || seekBarShown) && !areControlsLocked && !isLongPressing,
+                    visible = controlsShown && !areControlsLocked && !isLongPressing,
                     enter = if (!reduceMotion) {
                         slideInVertically(playerControlsEnterAnimationSpec()) { it } +
                             fadeIn(playerControlsEnterAnimationSpec())
