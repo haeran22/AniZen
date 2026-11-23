@@ -108,7 +108,10 @@ class ExtensionManager(
 
     private var subLanguagesEnabledOnFirstRun = preferences.enabledLanguages().isSet()
 
-    fun getAppIconForSource(sourceId: Long): Drawable? {
+        fun getAppIconForSource(sourceId: Long): Drawable? {
+        if (sourceId == exh.source.MERGED_SOURCE_ID) {
+            return androidx.core.content.ContextCompat.getDrawable(context, eu.kanade.tachiyomi.R.mipmap.ic_launcher)
+        }
         val pkgName = installedExtensionsMapFlow.value.values
             .find { ext ->
                 ext.sources.any { it.id == sourceId }
