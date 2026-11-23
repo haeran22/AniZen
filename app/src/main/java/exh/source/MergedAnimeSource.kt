@@ -19,6 +19,7 @@ class MergedAnimeSource : AnimeSource {
     override val id: Long = MERGED_SOURCE_ID
     override val name: String = "Merged"
     override val lang: String = "all"
+    override fun toString(): String = name
 
     private val getAnime: GetAnime by injectLazy()
     private val getMergedAnimeById: GetMergedAnimeById by injectLazy()
