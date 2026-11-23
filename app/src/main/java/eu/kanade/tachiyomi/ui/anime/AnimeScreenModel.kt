@@ -638,8 +638,8 @@ class AnimeScreenModel(
                     useHierarchicalSeasons = useHierarchicalSeasons,
                     virtualSeasonsFlow = virtualSeasonsFlow,
                 ).distinctUntilChanged(),
-                getMergedEpisodesByAnimeId.subscribe(
-                    animeId = animeId,
+                                getMergedEpisodesByAnimeId.subscribe(
+                    mangaId = animeId,
                     applyScanlatorFilter = true,
                 ).distinctUntilChanged(),
                 getAvailableScanlators.subscribe(animeId),
