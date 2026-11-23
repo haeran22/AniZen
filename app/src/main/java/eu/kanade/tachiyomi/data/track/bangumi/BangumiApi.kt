@@ -149,7 +149,7 @@ class BangumiApi(
                         .awaitSuccess()
                         .parseAs<BGMSubject>()
                         .let { anime ->
-                        val imageUrl = anime.images?.large?.ifEmpty { null }
+                        val imageUrl: String? = anime.images?.large?.ifEmpty { null }
                             ?: anime.images?.medium?.ifEmpty { null }
                             ?: anime.images?.common?.ifEmpty { null }
 
