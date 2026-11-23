@@ -20,7 +20,7 @@ val Source.icon: ImageBitmap?
     get() {
         val cached = iconBitmapCache.getOrPut(id) {
             val drawable = if (id == MERGED_SOURCE_ID) {
-                ContextCompat.getDrawable(Injekt.get<Context>(), R.drawable.ic_launcher_foreground)
+                ContextCompat.getDrawable(Injekt.get<Context>(), R.mipmap.ic_launcher)
             } else {
                 Injekt.get<ExtensionManager>().getAppIconForSource(id)
             }
