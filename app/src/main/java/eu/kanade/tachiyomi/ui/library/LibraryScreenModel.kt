@@ -120,6 +120,9 @@ class LibraryScreenModel(
     private val getTracks: GetTracks = Injekt.get(),
     private val insertTrack: InsertTrack = Injekt.get(),
     private val deleteTrack: DeleteTrack = Injekt.get(),
+    private val networkToLocalAnime: tachiyomi.domain.anime.interactor.NetworkToLocalAnime = Injekt.get(),
+    private val animeMergeRepository: tachiyomi.domain.anime.repository.AnimeMergeRepository = Injekt.get(),
+
     // SY <--
 ) : StateScreenModel<LibraryScreenModel.State>(State()) {
 
@@ -862,6 +865,71 @@ class LibraryScreenModel(
                 ).toAnimeUpdate()
             }
             updateAnime.awaitAll(animeUpdates)
+        }
+    }
+    fun mergeSelectedAnimes() {
+        val selectedAnimes = state.value.selection.map { it.anime }
+            .filter { it.source != exh.source.MERGED_SOURCE_ID }
+        if (selectedAnimes.size < 2) {
+            clearSelection()
+            return
+        }
+        clearSelection()
+        screenModelScope.launchNonCancellable {
+            val mainAnime = selectedAnimes.first()
+            val mergedUrl = "/merged/${System.currentTimeMillis()}"
+            val insertedMergedAnime = networkToLocalAnime.await(
+                mainAnime.copy(
+                    id = -1L,
+                    source = exh.source.MERGED_SOURCE_ID,
+                    url = mergedUrl,
+                    favorite = true,
+                    dateAdded = System.currentTimeMillis(),
+                ),
+            )
+            val mergeId = insertedMergedAnime.id
+            if (mergeId <= 0L) return@launchNonCancellable
+
+            val references = mutableListOf(
+                tachiyomi.domain.anime.model.MergedAnimeReference(
+                    id = -1L,
+                    isInfoAnime = false,
+                    getEpisodeUpdates = false,
+                    episodeSortMode = tachiyomi.domain.anime.model.MergedAnimeReference.EPISODE_SORT_NO_DEDUPE,
+                    episodePriority = 0,
+                    downloadEpisodes = false,
+                    mergeId = mergeId,
+                    mergeUrl = mergedUrl,
+                    animeId = mergeId,
+                    animeUrl = mergedUrl,
+                    animeSourceId = exh.source.MERGED_SOURCE_ID,
+                ),
+            )
+
+            selectedAnimes.forEachIndexed { index, anime ->
+                references.add(
+                    tachiyomi.domain.anime.model.MergedAnimeReference(
+                        id = -1L,
+                        isInfoAnime = index == 0,
+                        getEpisodeUpdates = true,
+                        episodeSortMode = tachiyomi.domain.anime.model.MergedAnimeReference.EPISODE_SORT_NONE,
+                        episodePriority = index,
+                        downloadEpisodes = true,
+                        mergeId = mergeId,
+                        mergeUrl = mergedUrl,
+                        animeId = anime.id,
+                        animeUrl = anime.url,
+                        animeSourceId = anime.source,
+                    ),
+                )
+            }
+
+            animeMergeRepository.insertAll(references)
+
+            val categoryIds = getCategories.await(mainAnime.id).map { it.id }
+            if (categoryIds.isNotEmpty()) {
+                setAnimeCategories.await(mergeId, categoryIds)
+            }
         }
     }
 
