@@ -12,15 +12,25 @@ import kotlinx.serialization.json.JsonPrimitive
 
 @Serializable
 data class BGMSubject(
-    val images: BGMSearchItemCovers?,
-    val summary: String,
-    val name: String,
+    val images: BGMSubjectImages?,
+    val summary: String = "",
+    val name: String = "",
     @SerialName("name_cn")
-    val nameCn: String,
-    val tags: List<BGMTag>,
-    val infobox: List<Infobox>,
+    val nameCn: String = "",
+    val tags: List<BGMTag> = emptyList(),
+    val infobox: List<Infobox> = emptyList(),
     val id: Long,
 )
+
+@Serializable
+data class BGMSubjectImages(
+    val large: String? = null,
+    val common: String? = null,
+    val medium: String? = null,
+    val small: String? = null,
+    val grid: String? = null,
+)
+
 
 // infobox deserializer and related classes courtesy of
 // https://github.com/Snd-R/komf/blob/4c260a3dcd326a5e1d74ac9662eec8124ab7e461/komf-core/src/commonMain/kotlin/snd/komf/providers/bangumi/model/BangumiSubject.kt#L53-L89
