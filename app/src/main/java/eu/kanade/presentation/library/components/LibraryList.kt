@@ -100,20 +100,10 @@ internal fun LibraryList(
                                 sourceLanguage = libraryItem.sourceLanguage,
                                 showLanguageIcon = libraryItem.showLanguageIcon,
                             )
-                            if (libraryItem.showSourceIcon) {
-                        domainSource = sources.find { it.first.id == mangaWithFolder.anime.source }?.first
-                            ?: if (mangaWithFolder.anime.source == exh.source.MERGED_SOURCE_ID) {
-                                tachiyomi.domain.source.model.Source(
-                                    id = exh.source.MERGED_SOURCE_ID,
-                                    lang = "all",
-                                    name = "Merged",
-                                    supportsLatest = false,
-                                    isStub = false,
-                                )
-                            } else {
-                                null
-                            },
-                            }
+                                                     if (libraryItem.showSourceIcon) {
+                             SourceIconBadge(source = libraryItem.domainSource)
+                         }
+
                         },
                         onLongClick = { onLongClick(libraryItem.libraryAnime) },
                         onClick = { onClick(libraryItem.libraryAnime) },
