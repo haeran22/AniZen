@@ -189,7 +189,7 @@ class BangumiApi(
                             TrackAnimeMetadata(
                                 remoteId = anime.id,
                                 title = anime.nameCn.ifEmpty { anime.name },
-                                thumbnailUrl = imageUrl,
+                                thumbnailUrl = imageUrl ?: "",
                                 description = anime.summary,
                                 author = author,
                                 artist = artist,
