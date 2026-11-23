@@ -9,7 +9,7 @@ import eu.kanade.tachiyomi.data.track.bangumi.dto.BGMSearchItem
 import eu.kanade.tachiyomi.data.track.bangumi.dto.BGMSearchResult
 import eu.kanade.tachiyomi.data.track.bangumi.dto.BGMSubject
 import eu.kanade.tachiyomi.data.track.bangumi.dto.Infobox
-import eu.kanade.tachiyomi.data.track.model.TrackMangaMetadata
+import eu.kanade.tachiyomi.data.track.model.TrackAnimeMetadata
 import eu.kanade.tachiyomi.data.track.model.TrackSearch
 import eu.kanade.tachiyomi.network.GET
 import eu.kanade.tachiyomi.network.POST
@@ -24,7 +24,7 @@ import tachiyomi.core.common.util.lang.withIOContext
 import uy.kohesive.injekt.injectLazy
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
-import tachiyomi.domain.track.model.Track as DomainTrack
+import tachiyomi.domain.track.model.Track as DomainAnimeTrack
 
 class BangumiApi(
     private val trackId: Long,
@@ -141,56 +141,65 @@ class BangumiApi(
         }
     }
 
-    suspend fun getAnimeMetadata(track: DomainTrack): TrackMangaMetadata {
-        return withIOContext {
-            with(json) {
-                authClient.newCall(GET("$API_URL/v0/subjects/${track.remoteId}"))
-                    .awaitSuccess()
-                    .parseAs<BGMSubject>()
-                    .let { anime ->
-                        val imageUrl = anime.images?.large?.takeIf { it.isNotBlank() }
-                            ?: anime.images?.medium?.takeIf { it.isNotBlank() }
-                            ?: anime.images?.common?.takeIf { it.isNotBlank() }
+    suspend fun getAnimeMetadata(track: DomainAnimeTrack): TrackAnimeMetadata? {
+        return try {
+            withIOContext {
+                with(json) {
+                    authClient.newCall(GET("$API_URL/v0/subjects/${track.remoteId}"))
+                        .awaitSuccess()
+                        .parseAs<BGMSubject>()
+                        .let { anime ->
+                            val imageUrl = anime.images?.large?.takeIf { it.isNotBlank() }
+                                ?: anime.images?.medium?.takeIf { it.isNotBlank() }
+                                ?: anime.images?.common?.takeIf { it.isNotBlank() }
 
-                        val authors = anime.infobox
-                            .filter {
-                                it.key.contains("原作", true) ||
-                                    it.key.contains("分镜", true) ||
-                                    it.key.contains("脚本", true)
-                            }
-                            .filterIsInstance<Infobox.SingleValue>()
-                            .joinToString { it.value }
-                            .ifEmpty { null }
+                            val author = anime.infobox
+                                .filter {
+                                    it.key.contains("原作", true) ||
+                                        it.key.contains("分镜", true) ||
+                                        it.key.contains("脚本", true)
+                                }
+                                .filterIsInstance<Infobox.SingleValue>()
+                                .joinToString { it.value }
+                                .ifEmpty { null }
 
-                        val artists = anime.infobox
-                            .filter {
-                                it.key.contains("制片", true) ||
-                                    it.key.contains("制作", true) ||
-                                    it.key.contains("导演", true) ||
-                                    it.key.contains("构成", true) ||
-                                    it.key.contains("动画", true) ||
-                                    it.key.contains("摄影", true) ||
-                                    it.key.contains("美术", true) ||
-                                    it.key.contains("插图", true) ||
-                                    it.key.contains("原案", true) ||
-                                    it.key.contains("设计", true) ||
-                                    it.key.contains("音乐", true) ||
-                                    it.key.contains("音响", true)
-                            }
-                            .filterIsInstance<Infobox.SingleValue>()
-                            .joinToString { it.value }
-                            .ifEmpty { null }
+                            val artist = anime.infobox
+                                .filter {
+                                    it.key.contains("制片", true) ||
+                                        it.key.contains("制作", true) ||
+                                        it.key.contains("导演", true) ||
+                                        it.key.contains("构成", true) ||
+                                        it.key.contains("动画", true) ||
+                                        it.key.contains("摄影", true) ||
+                                        it.key.contains("美术", true) ||
+                                        it.key.contains("插图", true) ||
+                                        it.key.contains("原案", true) ||
+                                        it.key.contains("设计", true) ||
+                                        it.key.contains("音乐", true) ||
+                                        it.key.contains("音响", true)
+                                }
+                                .filterIsInstance<Infobox.SingleValue>()
+                                .joinToString { it.value }
+                                .ifEmpty { null }
 
-                        TrackMangaMetadata(
-                            remoteId = anime.id,
-                            title = anime.nameCn.ifEmpty { anime.name },
-                            thumbnailUrl = imageUrl,
-                            description = anime.summary,
-                            authors = authors,
-                            artists = artists,
-                        )
-                    }
+                            val genres = anime.tags
+                                .mapNotNull { it.name?.takeIf { tag -> tag.isNotBlank() } }
+                                .ifEmpty { null }
+
+                            TrackAnimeMetadata(
+                                remoteId = anime.id,
+                                title = anime.nameCn.ifEmpty { anime.name },
+                                thumbnailUrl = imageUrl,
+                                description = anime.summary,
+                                author = author,
+                                artist = artist,
+                                genres = genres,
+                            )
+                        }
+                }
             }
+        } catch (_: Exception) {
+            null
         }
     }
 
@@ -218,7 +227,7 @@ class BangumiApi(
     companion object {
         private const val CLIENT_ID = "bgm76146b033ec124b23"
         private const val CLIENT_SECRET = "7efa2da797ce858665f2c070d9d0fdf5"
-        private const val USER_AGENT = "haeran22/AniZen/1.0 (https://github.com)"
+        private const val USER_AGENT = "haeran22/AniZen/1.0"
 
         private const val API_URL = "https://api.bgm.tv"
         private const val OAUTH_URL = "https://bgm.tv/oauth/access_token"
