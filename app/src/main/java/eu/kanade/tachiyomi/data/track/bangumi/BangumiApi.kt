@@ -7,6 +7,9 @@ import eu.kanade.tachiyomi.data.track.bangumi.dto.BGMCollectionResponse
 import eu.kanade.tachiyomi.data.track.bangumi.dto.BGMOAuth
 import eu.kanade.tachiyomi.data.track.bangumi.dto.BGMSearchItem
 import eu.kanade.tachiyomi.data.track.bangumi.dto.BGMSearchResult
+import eu.kanade.tachiyomi.data.track.bangumi.dto.BGMSubject
+import eu.kanade.tachiyomi.data.track.bangumi.dto.Infobox
+import eu.kanade.tachiyomi.data.track.model.TrackMangaMetadata
 import eu.kanade.tachiyomi.data.track.model.TrackSearch
 import eu.kanade.tachiyomi.network.GET
 import eu.kanade.tachiyomi.network.POST
@@ -15,14 +18,13 @@ import eu.kanade.tachiyomi.network.parseAs
 import kotlinx.serialization.json.Json
 import okhttp3.CacheControl
 import okhttp3.FormBody
-import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
-import okhttp3.RequestBody.Companion.toRequestBody
 import tachiyomi.core.common.util.lang.withIOContext
 import uy.kohesive.injekt.injectLazy
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
+import tachiyomi.domain.track.model.Track as DomainTrack
 
 class BangumiApi(
     private val trackId: Long,
@@ -139,35 +141,79 @@ class BangumiApi(
         }
     }
 
-    suspend fun accessToken(code: String): BGMOAuth {
+    suspend fun getAnimeMetadata(track: DomainTrack): TrackMangaMetadata {
         return withIOContext {
-            val response = client.newCall(accessTokenRequest(code)).execute()
-            val bodyString = response.body.string()
-            if (!response.isSuccessful) {
-                throw Exception("Bangumi HTTP ${response.code}: $bodyString")
+            with(json) {
+                authClient.newCall(GET("$API_URL/v0/subjects/${track.remoteId}"))
+                    .awaitSuccess()
+                    .parseAs<BGMSubject>()
+                    .let { anime ->
+                        val imageUrl = anime.images?.large?.takeIf { it.isNotBlank() }
+                            ?: anime.images?.medium?.takeIf { it.isNotBlank() }
+                            ?: anime.images?.common?.takeIf { it.isNotBlank() }
+
+                        val authors = anime.infobox
+                            .filter {
+                                it.key.contains("原作", true) ||
+                                    it.key.contains("分镜", true) ||
+                                    it.key.contains("脚本", true)
+                            }
+                            .filterIsInstance<Infobox.SingleValue>()
+                            .joinToString { it.value }
+                            .ifEmpty { null }
+
+                        val artists = anime.infobox
+                            .filter {
+                                it.key.contains("制片", true) ||
+                                    it.key.contains("制作", true) ||
+                                    it.key.contains("导演", true) ||
+                                    it.key.contains("构成", true) ||
+                                    it.key.contains("动画", true) ||
+                                    it.key.contains("摄影", true) ||
+                                    it.key.contains("美术", true) ||
+                                    it.key.contains("插图", true) ||
+                                    it.key.contains("原案", true) ||
+                                    it.key.contains("设计", true) ||
+                                    it.key.contains("音乐", true) ||
+                                    it.key.contains("音响", true)
+                            }
+                            .filterIsInstance<Infobox.SingleValue>()
+                            .joinToString { it.value }
+                            .ifEmpty { null }
+
+                        TrackMangaMetadata(
+                            remoteId = anime.id,
+                            title = anime.nameCn.ifEmpty { anime.name },
+                            thumbnailUrl = imageUrl,
+                            description = anime.summary,
+                            authors = authors,
+                            artists = artists,
+                        )
+                    }
             }
-            json.decodeFromString<BGMOAuth>(bodyString)
         }
     }
 
-    private fun accessTokenRequest(code: String): Request {
-        val jsonBody = """
-            {
-                "grant_type": "authorization_code",
-                "client_id": "$CLIENT_ID",
-                "client_secret": "$CLIENT_SECRET",
-                "code": "$code",
-                "redirect_uri": "$REDIRECT_URL"
+    suspend fun accessToken(code: String): BGMOAuth {
+        return withIOContext {
+            with(json) {
+                client.newCall(accessTokenRequest(code))
+                    .awaitSuccess()
+                    .parseAs()
             }
-        """.trimIndent()
-
-        return Request.Builder()
-            .url(OAUTH_URL)
-            .header("User-Agent", USER_AGENT)
-            .header("Accept", "application/json")
-            .post(jsonBody.toRequestBody("application/json; charset=utf-8".toMediaType()))
-            .build()
+        }
     }
+
+    private fun accessTokenRequest(code: String) = POST(
+        OAUTH_URL,
+        body = FormBody.Builder()
+            .add("grant_type", "authorization_code")
+            .add("client_id", CLIENT_ID)
+            .add("client_secret", CLIENT_SECRET)
+            .add("code", code)
+            .add("redirect_uri", REDIRECT_URL)
+            .build(),
+    )
 
     companion object {
         private const val CLIENT_ID = "bgm76146b033ec124b23"
@@ -187,23 +233,15 @@ class BangumiApi(
                 .appendQueryParameter("redirect_uri", REDIRECT_URL)
                 .build()
 
-        fun refreshTokenRequest(token: String): Request {
-            val jsonBody = """
-                {
-                    "grant_type": "refresh_token",
-                    "client_id": "$CLIENT_ID",
-                    "client_secret": "$CLIENT_SECRET",
-                    "refresh_token": "$token",
-                    "redirect_uri": "$REDIRECT_URL"
-                }
-            """.trimIndent()
-
-            return Request.Builder()
-                .url(OAUTH_URL)
-                .header("User-Agent", USER_AGENT)
-                .header("Accept", "application/json")
-                .post(jsonBody.toRequestBody("application/json; charset=utf-8".toMediaType()))
-                .build()
-        }
+        fun refreshTokenRequest(token: String) = POST(
+            OAUTH_URL,
+            body = FormBody.Builder()
+                .add("grant_type", "refresh_token")
+                .add("client_id", CLIENT_ID)
+                .add("client_secret", CLIENT_SECRET)
+                .add("refresh_token", token)
+                .add("redirect_uri", REDIRECT_URL)
+                .build(),
+        )
     }
 }
