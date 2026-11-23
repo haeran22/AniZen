@@ -194,6 +194,7 @@ class AnimeScreenModel(
     private val getAnimeSeasonsById: tachiyomi.domain.season.interactor.GetAnimeSeasonsById = Injekt.get(),
     private val discoverSeasons: tachiyomi.domain.anime.interactor.DiscoverSeasons = Injekt.get(),
     private val getMergedAnimeById: tachiyomi.domain.anime.interactor.GetMergedAnimeById = Injekt.get(),
+    private val getMergedEpisodesByAnimeId: tachiyomi.domain.episode.interactor.GetMergedEpisodesByAnimeId = Injekt.get(),
     private val fetchInterval: FetchInterval = Injekt.get(),
     private val removeHistory: tachiyomi.domain.history.interactor.RemoveHistory = Injekt.get(),
     private val animeMergeRepository: tachiyomi.domain.anime.repository.AnimeMergeRepository = Injekt.get(),
@@ -569,7 +570,9 @@ class AnimeScreenModel(
                 initialAnime
             }
 
-            val initialEpisodes = if (anime.fetchType != FetchType.Seasons) {
+                    val initialEpisodes = if (anime.source == exh.source.MERGED_SOURCE_ID) {
+                getMergedEpisodesByAnimeId.await(animeId, applyScanlatorFilter = true).toEpisodeListItems(anime)
+            } else if (anime.fetchType != FetchType.Seasons) {
                 getAnimeAndEpisodesAndSeasons.awaitEpisodes(animeId).toEpisodeListItems(anime)
             } else {
                 emptyList()
@@ -628,21 +631,41 @@ class AnimeScreenModel(
 
             val useHierarchicalSeasons = libraryPreferences.useHierarchicalSeasons().get()
 
-            combine(
+                   combine(
                 getAnimeAndEpisodesAndSeasons.subscribe(
                     id = animeId,
                     applyScanlatorFilter = true,
                     useHierarchicalSeasons = useHierarchicalSeasons,
                     virtualSeasonsFlow = virtualSeasonsFlow,
                 ).distinctUntilChanged(),
+                getMergedEpisodesByAnimeId.subscribe(
+                    animeId = animeId,
+                    applyScanlatorFilter = true,
+                ).distinctUntilChanged(),
                 getAvailableScanlators.subscribe(animeId),
                 getExcludedScanlators.subscribe(animeId),
                 downloadCache.changes,
                 downloadManager.queueState,
-            ) { triple, availableScanlators, excludedScanlators, _, _ ->
-                Triple(triple, availableScanlators, excludedScanlators)
+            ) { values ->
+                @Suppress("UNCHECKED_CAST")
+                val triple = values[0] as Triple<Anime, List<Episode>, List<tachiyomi.domain.anime.model.SeasonAnime>>
+                @Suppress("UNCHECKED_CAST")
+                val mergedEpisodes = values[1] as List<Episode>
+                @Suppress("UNCHECKED_CAST")
+                val availableScanlators = values[2] as List<String>
+                @Suppress("UNCHECKED_CAST")
+                val excludedScanlators = values[3] as Set<String>
+                Pair(
+                    Triple(
+                        triple.first,
+                        if (triple.first.source == exh.source.MERGED_SOURCE_ID) mergedEpisodes else triple.second,
+                        triple.third,
+                    ),
+                    Pair(availableScanlators, excludedScanlators),
+                )
             }
-                .onEach { (triple, availableScanlators, excludedScanlators) ->
+                .onEach { (triple, scanlatorPair) ->
+                    val (availableScanlators, excludedScanlators) = scanlatorPair
                     val (anime, episodes, seasonAnimes) = triple
                     val hasHierarchicalSeasons = seasonAnimes.isNotEmpty() || anime.parentId != null
 
@@ -1455,8 +1478,36 @@ class AnimeScreenModel(
         }
     }
 
-    private suspend fun fetchEpisodesFromSource(manualFetch: Boolean = false) {
+     private suspend fun fetchEpisodesFromSource(manualFetch: Boolean = false) {
         val state = successState ?: return
+
+        if (state.anime.source == exh.source.MERGED_SOURCE_ID) {
+            try {
+                withIOContext {
+                    val references = animeMergeRepository.getReferencesById(state.anime.id)
+                        .filter { it.animeSourceId != exh.source.MERGED_SOURCE_ID && it.getEpisodeUpdates }
+                    references.forEach { ref ->
+                        val childAnime = ref.animeId?.let { getAnime.await(it) } ?: return@forEach
+                        val childSource = sourceManager.getOrStub(childAnime.source)
+                        val episodes = childSource.getAnimeEpisodeUpdate(
+                            anime = childAnime.toSAnime(),
+                            episodes = emptyList(),
+                            fetchDetails = false,
+                            fetchEpisodes = true,
+                        ).episodes
+                        syncEpisodesWithSource.await(episodes, childAnime, childSource, manualFetch)
+                    }
+                    if (manualFetch) {
+                        val allMergedEpisodes = getMergedEpisodesByAnimeId.await(state.anime.id, applyScanlatorFilter = true)
+                        downloadNewEpisodes(allMergedEpisodes)
+                    }
+                }
+            } catch (e: Throwable) {
+                logcat(LogPriority.ERROR, e)
+                screenModelScope.launch { snackbarHostState.showSnackbar(message = with(context) { e.formattedMessage }) }
+            }
+            return
+        }
 
         if (state.anime.fetchType == FetchType.Seasons) {
             fetchSeasonsFromSource(manualFetch)
@@ -1486,6 +1537,7 @@ class AnimeScreenModel(
             updateSuccessState { it.copySuccess(anime = newAnime, isRefreshingData = false) }
         }
     }
+
 
     fun episodeSwipe(episodeItem: EpisodeList.Item, swipeAction: LibraryPreferences.EpisodeSwipeAction) {
         screenModelScope.launch { executeEpisodeSwipeAction(episodeItem, swipeAction) }
