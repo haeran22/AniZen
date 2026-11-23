@@ -638,7 +638,7 @@ class AnimeScreenModel(
                     useHierarchicalSeasons = useHierarchicalSeasons,
                     virtualSeasonsFlow = virtualSeasonsFlow,
                 ).distinctUntilChanged(),
-                                getMergedEpisodesByAnimeId.subscribe(
+                getMergedEpisodesByAnimeId.subscribe(
                     mangaId = animeId,
                     applyScanlatorFilter = true,
                 ).distinctUntilChanged(),
