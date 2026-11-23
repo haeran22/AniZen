@@ -659,7 +659,18 @@ class LibraryScreenModel(
                         },
                         showSourceIcon = prefs.showSourceIcon,
                         showLanguageIcon = prefs.showLanguageIcon,
-                        domainSource = sources.find { it.first.id == mangaWithFolder.anime.source }?.first,
+                        domainSource = sources.find { it.first.id == mangaWithFolder.anime.source }?.first
+                            ?: if (mangaWithFolder.anime.source == exh.source.MERGED_SOURCE_ID) {
+                                tachiyomi.domain.source.model.Source(
+                                    id = exh.source.MERGED_SOURCE_ID,
+                                    lang = "all",
+                                    name = "Merged",
+                                    supportsLatest = false,
+                                    isStub = false,
+                                )
+                            } else {
+                                null
+                            },
                     )
                 }
                 .groupBy { it.libraryAnime.category }
