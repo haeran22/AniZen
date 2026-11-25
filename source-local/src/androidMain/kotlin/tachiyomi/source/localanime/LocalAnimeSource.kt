@@ -250,6 +250,13 @@ actual class LocalAnimeSource(
         val hasSeasonFolders = isRootAnime && getSeasonSubdirectories(anime.url).isNotEmpty()
         anime.fetch_type = if (hasSeasonFolders) FetchType.Seasons else FetchType.Episodes
 
+        if (!isRootAnime) {
+            val folderName = anime.url.substringAfterLast('/')
+            extractSeasonNumber(folderName)?.let {
+                anime.season_number = it.toDouble()
+            }
+        }
+
         val animeDirFiles = fileSystem.getFilesInAnimeDirectory(anime.url)
 
         animeDirFiles
@@ -269,6 +276,7 @@ actual class LocalAnimeSource(
 
         return@withIOContext anime
     }
+
 
     // Seasons (subfolders inside anime directory, Movie-style)
         override suspend fun getSeasonList(anime: SAnime): List<SAnime> = withIOContext {
