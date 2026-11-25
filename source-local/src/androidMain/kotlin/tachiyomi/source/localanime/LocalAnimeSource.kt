@@ -240,7 +240,7 @@ actual class LocalAnimeSource(
         return AnimeDetails(title, author, artist, description, genre?.split(", "), status)
     }
 
-    // Anime details related
+        // Anime details related
     override suspend fun getAnimeDetails(anime: SAnime): SAnime = withIOContext {
         findCoverUri(anime.url)?.let {
             anime.thumbnail_url = it
@@ -276,6 +276,7 @@ actual class LocalAnimeSource(
 
         return@withIOContext anime
     }
+
 
 
     // Seasons (subfolders inside anime directory, Movie-style)
