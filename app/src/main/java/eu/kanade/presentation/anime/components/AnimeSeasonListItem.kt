@@ -26,9 +26,9 @@ fun AnimeSeasonListItem(
     onClickContinueWatching: ((SeasonAnime) -> Unit)?,
     listItemModifier: Modifier = Modifier,
 ) {
-    val itemAnime = item.seasonAnime.anime
+       val itemAnime = item.seasonAnime.anime
     val seasonNum = itemAnime.seasonNumber ?: 0.0
-    val title = if (anime.seasonDisplayMode == Anime.SEASON_DISPLAY_MODE_NUMBER || seasonNum > 0.0) {
+    val title = if (!itemAnime.isLocal() && anime.seasonDisplayMode == Anime.SEASON_DISPLAY_MODE_NUMBER && seasonNum > 0.0) {
         val major = seasonNum.toInt()
         val minor = ((seasonNum - major) * 100).roundToInt()
         if (minor > 0) {
@@ -46,6 +46,7 @@ fun AnimeSeasonListItem(
     } else {
         itemAnime.title
     }
+
 
     when (anime.seasonDisplayGridMode) {
         SeasonDisplayMode.ComfortableGrid -> {
