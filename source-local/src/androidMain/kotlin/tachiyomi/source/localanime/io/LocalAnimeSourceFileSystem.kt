@@ -16,15 +16,14 @@ actual class LocalAnimeSourceFileSystem(
     }
 
     actual fun getAnimeDirectory(name: String): UniFile? {
-        return getBaseDirectory()
-            ?.findFile(name)
-            ?.takeIf { it.isDirectory }
+        var current: UniFile? = getBaseDirectory()
+        for (segment in name.split('/').filter { it.isNotEmpty() }) {
+            current = current?.findFile(segment)?.takeIf { it.isDirectory } ?: return null
+        }
+        return current
     }
 
     actual fun getFilesInAnimeDirectory(name: String): List<UniFile> {
-        return getBaseDirectory()
-            ?.findFile(name)
-            ?.takeIf { it.isDirectory }
-            ?.listFiles().orEmpty().toList()
+        return getAnimeDirectory(name)?.listFiles().orEmpty().toList()
     }
 }
