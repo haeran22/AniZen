@@ -75,7 +75,7 @@ actual class LocalAnimeSource(
 
     override val supportsLatest = true
 
-    private fun extractSeasonNumber(text: String?): Int? {
+        private fun extractSeasonNumber(text: String?): Int? {
         if (text.isNullOrBlank()) return null
         val match = SEASON_REGEX.find(text) ?: return null
         return match.groupValues.getOrNull(1)?.toIntOrNull()
@@ -241,7 +241,7 @@ actual class LocalAnimeSource(
     }
 
     // Seasons (subfolders inside anime directory, Movie-style)
-    override suspend fun getSeasonList(anime: SAnime): List<SAnime> = withIOContext {
+        override suspend fun getSeasonList(anime: SAnime): List<SAnime> = withIOContext {
         val seasonDirs = getSeasonSubdirectories(anime.url)
         if (seasonDirs.isEmpty()) return@withIOContext emptyList()
 
@@ -256,10 +256,14 @@ actual class LocalAnimeSource(
                 fetch_type = FetchType.Episodes
                 season_number = detectedSeasonNum.toDouble()
                 thumbnail_url = findCoverUri(seasonUrl) ?: anime.thumbnail_url
+                initialized = true
 
                 // Optional per-season details.json
                 fileSystem.getFilesInAnimeDirectory(seasonUrl)
-                    .firstOrNull { it.extension == "json" && (it.nameWithoutExtension == "details" || it.nameWithoutExtension == "info") }
+                    .firstOrNull {
+                        it.extension == "json" &&
+                            (it.nameWithoutExtension == "details" || it.nameWithoutExtension == "info")
+                    }
                     ?.let { detailsFile ->
                         runCatching {
                             json.decodeFromStream<AnimeDetails>(detailsFile.openInputStream()).run {
@@ -366,6 +370,8 @@ actual class LocalAnimeSource(
             }
 
         // Generate the cover from the first episode found if not available
+            /*
+        // Generate the cover from the first episode found if not available
         if (anime.thumbnail_url == null) {
             scope.launch {
                 try {
@@ -377,6 +383,7 @@ actual class LocalAnimeSource(
                 }
             }
         }
+        */
 
         episodes
     }
