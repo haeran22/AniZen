@@ -2,6 +2,7 @@ package tachiyomi.source.localanime
 
 import android.content.Context
 import com.hippo.unifile.UniFile
+import eu.kanade.tachiyomi.animesource.model.FetchType
 import eu.kanade.tachiyomi.animesource.model.Video
 import eu.kanade.tachiyomi.source.CatalogueSource
 import eu.kanade.tachiyomi.source.Source
@@ -74,6 +75,46 @@ actual class LocalAnimeSource(
 
     override val supportsLatest = true
 
+    private fun extractSeasonNumber(text: String?): Int? {
+        if (text.isNullOrBlank()) return null
+        val match = SEASON_REGEX.find(text) ?: return null
+        return match.groupValues.getOrNull(1)?.toIntOrNull()
+    }
+
+    private fun getSeasonSubdirectories(animeUrl: String): List<UniFile> {
+        return fileSystem.getFilesInAnimeDirectory(animeUrl)
+            .filter { it.isDirectory && !it.name.orEmpty().startsWith('.') }
+            .sortedWith { d1, d2 ->
+                val s1 = extractSeasonNumber(d1.name)
+                val s2 = extractSeasonNumber(d2.name)
+                when {
+                    s1 != null && s2 != null && s1 != s2 -> s1.compareTo(s2)
+                    s1 != null && s2 == null -> -1
+                    s1 == null && s2 != null -> 1
+                    else -> d1.name.orEmpty().compareToCaseInsensitiveNaturalOrder(d2.name.orEmpty())
+                }
+            }
+    }
+
+    private fun findCoverUri(dirUrl: String): String? {
+        coverManager.find(dirUrl)?.let { return it.uri.toString() }
+        val imageExts = setOf("jpg", "jpeg", "png", "webp")
+        val files = fileSystem.getFilesInAnimeDirectory(dirUrl)
+        val coverFile = files.firstOrNull {
+            it.isFile &&
+                it.extension?.lowercase() in imageExts &&
+                it.nameWithoutExtension.equals("cover", ignoreCase = true)
+        } ?: files.firstOrNull {
+            it.isFile &&
+                it.extension?.lowercase() in imageExts &&
+                (
+                    it.nameWithoutExtension.equals("poster", ignoreCase = true) ||
+                        it.nameWithoutExtension.equals("folder", ignoreCase = true)
+                    )
+        }
+        return coverFile?.uri?.toString()
+    }
+
     // Browse related
     override suspend fun getPopularAnime(page: Int) = getSearchAnime(page, "", PopularFilters)
 
@@ -91,7 +132,6 @@ actual class LocalAnimeSource(
         }
 
         var animeDirs = fileSystem.getFilesInBaseDirectory()
-            // Filter out files that are hidden and is not a folder
             .filter { it.isDirectory && !it.name.orEmpty().startsWith('.') }
             .distinctBy { it.name }
             .filter {
@@ -130,18 +170,16 @@ actual class LocalAnimeSource(
             }
         }
 
-        // Transform animeDirs to list of SAnime
         val animes = animeDirs
             .map { animeDir ->
                 async {
+                    val dirName = animeDir.name.orEmpty()
+                    val hasSeasonFolders = !dirName.contains('/') && getSeasonSubdirectories(dirName).isNotEmpty()
                     SAnime.create().apply {
-                        title = animeDir.name.orEmpty()
-                        url = animeDir.name.orEmpty()
-
-                        // Try to find the cover
-                        coverManager.find(animeDir.name.orEmpty())?.let {
-                            thumbnail_url = it.uri.toString()
-                        }
+                        title = dirName
+                        url = dirName
+                        fetch_type = if (hasSeasonFolders) FetchType.Seasons else FetchType.Episodes
+                        thumbnail_url = findCoverUri(dirName)
                     }
                 }
             }
@@ -166,11 +204,10 @@ actual class LocalAnimeSource(
     }
 
     fun updateAnimeInfo(anime: SAnime) {
-        val directory = fileSystem.getFilesInBaseDirectory().map { File(it.filePath, anime.url) }.find {
-            it.exists()
-        } ?: return
-        val existingFileName = directory.listFiles()?.find { it.extension == "json" }?.name
-        val file = File(directory, existingFileName ?: "info.json")
+        val directory = fileSystem.getAnimeDirectory(anime.url)?.filePath?.let { File(it) }
+            ?.takeIf { it.exists() } ?: return
+        val existingFileName = directory.listFiles()?.find { it.extension == "json" && it.name != "episodes.json" }?.name
+        val file = File(directory, existingFileName ?: "details.json")
         file.outputStream().use {
             json.encodeToStream(anime.toJson(), it)
         }
@@ -182,41 +219,99 @@ actual class LocalAnimeSource(
 
     // Anime details related
     override suspend fun getAnimeDetails(anime: SAnime): SAnime = withIOContext {
-        coverManager.find(anime.url)?.let {
-            anime.thumbnail_url = it.uri.toString()
+        findCoverUri(anime.url)?.let {
+            anime.thumbnail_url = it
         }
+
+        val isRootAnime = !anime.url.contains('/')
+        val hasSeasonFolders = isRootAnime && getSeasonSubdirectories(anime.url).isNotEmpty()
+        anime.fetch_type = if (hasSeasonFolders) FetchType.Seasons else FetchType.Episodes
 
         val animeDirFiles = fileSystem.getFilesInAnimeDirectory(anime.url)
 
         animeDirFiles
-            .firstOrNull { it.extension == "json" && it.nameWithoutExtension == "details" }
+            .firstOrNull { it.extension == "json" && (it.nameWithoutExtension == "details" || it.nameWithoutExtension == "info") }
             ?.let { file ->
-                json.decodeFromStream<AnimeDetails>(file.openInputStream()).run {
-                    title?.let { anime.title = it }
-                    author?.let { anime.author = it }
-                    artist?.let { anime.artist = it }
-                    description?.let { anime.description = it }
-                    genre?.let { anime.genre = it.joinToString() }
-                    status?.let { anime.status = it }
+                runCatching {
+                    json.decodeFromStream<AnimeDetails>(file.openInputStream()).run {
+                        title?.let { anime.title = it }
+                        author?.let { anime.author = it }
+                        artist?.let { anime.artist = it }
+                        description?.let { anime.description = it }
+                        genre?.let { anime.genre = it.joinToString() }
+                        status?.let { anime.status = it }
+                    }
                 }
             }
 
         return@withIOContext anime
     }
 
+    // Seasons (subfolders inside anime directory, Movie-style)
+    override suspend fun getSeasonList(anime: SAnime): List<SAnime> = withIOContext {
+        val seasonDirs = getSeasonSubdirectories(anime.url)
+        if (seasonDirs.isEmpty()) return@withIOContext emptyList()
+
+        seasonDirs.mapIndexed { index, seasonDir ->
+            val folderName = seasonDir.name.orEmpty()
+            val seasonUrl = "${anime.url}/$folderName"
+            val detectedSeasonNum = extractSeasonNumber(folderName) ?: (index + 1)
+
+            SAnime.create().apply {
+                url = seasonUrl
+                title = folderName
+                fetch_type = FetchType.Episodes
+                season_number = detectedSeasonNum.toDouble()
+                thumbnail_url = findCoverUri(seasonUrl) ?: anime.thumbnail_url
+
+                // Optional per-season details.json
+                fileSystem.getFilesInAnimeDirectory(seasonUrl)
+                    .firstOrNull { it.extension == "json" && (it.nameWithoutExtension == "details" || it.nameWithoutExtension == "info") }
+                    ?.let { detailsFile ->
+                        runCatching {
+                            json.decodeFromStream<AnimeDetails>(detailsFile.openInputStream()).run {
+                                title?.let { this@apply.title = it }
+                                author?.let { this@apply.author = it }
+                                artist?.let { this@apply.artist = it }
+                                description?.let { this@apply.description = it }
+                                genre?.let { this@apply.genre = it.joinToString() }
+                                status?.let { this@apply.status = it }
+                            }
+                        }
+                    }
+            }
+        }
+    }
+
     // Episodes
     override suspend fun getEpisodeList(anime: SAnime): List<SEpisode> = withIOContext {
-        val episodesData = fileSystem.getFilesInAnimeDirectory(anime.url)
-            .firstOrNull {
-                it.extension == "json" && it.nameWithoutExtension == "episodes"
-            }?.let { file ->
-                runCatching {
-                    json.decodeFromStream<List<EpisodeDetails>>(file.openInputStream())
-                }.getOrNull()
+        val parentAnimeUrl = anime.url.substringBefore('/', "")
+        val seasonFromFolder = if (anime.url.contains('/')) {
+            extractSeasonNumber(anime.url.substringAfterLast('/'))
+        } else {
+            null
+        }
+
+        // Load local episodes.json (either in season folder or fallback to root anime folder)
+        val localEpisodesData = fileSystem.getFilesInAnimeDirectory(anime.url)
+            .firstOrNull { it.extension == "json" && it.nameWithoutExtension == "episodes" }
+            ?.let { file ->
+                runCatching { json.decodeFromStream<List<EpisodeDetails>>(file.openInputStream()) }.getOrNull()
             }
 
+        val rootEpisodesData = if (localEpisodesData == null && parentAnimeUrl.isNotEmpty()) {
+            fileSystem.getFilesInAnimeDirectory(parentAnimeUrl)
+                .firstOrNull { it.extension == "json" && it.nameWithoutExtension == "episodes" }
+                ?.let { file ->
+                    runCatching { json.decodeFromStream<List<EpisodeDetails>>(file.openInputStream()) }.getOrNull()
+                }
+        } else {
+            null
+        }
+
+        val episodesData = localEpisodesData ?: rootEpisodesData
+
         val episodes = fileSystem.getFilesInAnimeDirectory(anime.url)
-            // Only keep supported formats
             .filter { Archive.isSupported(it) }
             .map { episodeFile ->
                 SEpisode.create().apply {
@@ -224,6 +319,7 @@ actual class LocalAnimeSource(
                     name = episodeFile.nameWithoutExtension.orEmpty()
                     date_upload = episodeFile.lastModified()
 
+                    val detectedSeason = extractSeasonNumber(this.name) ?: seasonFromFolder
                     val episodeNumber = EpisodeRecognition.parseEpisodeNumber(
                         anime.title,
                         this.name,
@@ -231,29 +327,42 @@ actual class LocalAnimeSource(
                     ).toFloat()
                     episode_number = episodeNumber
 
-                    // Overwrite data from episodes.json file
+                    // Overwrite data from episodes.json matching both season and episode number
                     episodesData?.also { dataList ->
-                        dataList.firstOrNull { it.episode_number.equalsTo(episodeNumber) }
-                            ?.also { data ->
-                                data.name?.also { name = it }
-                                data.date_upload?.also { date_upload = parseDate(it) }
-                                scanlator = data.scanlator
-                                summary = data.summary
-                                data.preview_url?.also { preview_url = it }
+                        val matchedData = if (detectedSeason != null) {
+                            dataList.firstOrNull { entry ->
+                                val entrySeason = entry.resolvedSeason ?: extractSeasonNumber(entry.name)
+                                entry.episode_number.equalsTo(episodeNumber) && entrySeason == detectedSeason
+                            } ?: if (localEpisodesData != null) {
+                                // Inside a season-specific episodes.json, allow entries without explicit season tag
+                                dataList.firstOrNull { entry ->
+                                    val entrySeason = entry.resolvedSeason ?: extractSeasonNumber(entry.name)
+                                    entry.episode_number.equalsTo(episodeNumber) && entrySeason == null
+                                }
+                            } else {
+                                null
                             }
+                        } else {
+                            dataList.firstOrNull { entry ->
+                                val entrySeason = entry.resolvedSeason ?: extractSeasonNumber(entry.name)
+                                entry.episode_number.equalsTo(episodeNumber) && (entrySeason == null || entrySeason == 1)
+                            }
+                        }
+
+                        matchedData?.also { data ->
+                            data.name?.also { name = it }
+                            data.date_upload?.also { date_upload = parseDate(it) }
+                            scanlator = data.scanlator
+                            summary = data.summary
+                            data.preview_url?.also { preview_url = it }
+                        }
                     }
 
-                    // Look for local episode thumbnail file or extract frame from video if thumbnail is missing
+                    // Look for local episode thumbnail file only (video extraction disabled)
                     if (this.preview_url == null) {
                         val thumbnailFile = thumbnailManager.find(anime.url, this.name)
                         if (thumbnailFile != null) {
                             this.preview_url = thumbnailFile.uri.toString()
-                        } else {
-                            try {
-                                updateEpisodeThumbnailFromVideo(this, anime)
-                            } catch (e: Exception) {
-                                logcat(LogPriority.ERROR) { "Couldn't extract episode thumbnail from video: $e" }
-                            }
                         }
                     }
                 }
@@ -296,25 +405,23 @@ actual class LocalAnimeSource(
     private fun updateCoverFromVideo(episode: SEpisode, anime: SAnime) {
         val tempFile = File.createTempFile(
             "tmp_",
-            anime.title + DEFAULT_COVER_NAME,
+            anime.title.replace('/', '_') + DEFAULT_COVER_NAME,
         )
         val outFile = tempFile.path
 
-        val episodeName = episode.url.split('/', limit = 2).last()
-        val animeDir = fileSystem.getAnimeDirectory(anime.url)!!
-        val episodeFile = animeDir.findFile(episodeName)!!
+        val episodeName = episode.url.substringAfterLast('/')
+        val animeDir = fileSystem.getAnimeDirectory(anime.url) ?: return
+        val episodeFile = animeDir.findFile(episodeName) ?: return
         val episodeFilename = { episodeFile.toFFmpegString(context) }
 
-// ANZ -->
         val ffProbe = com.arthenica.ffmpegkit.FFprobeKit.execute(
-            "-v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 \"${episodeFilename()}\"",
+            "-v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "${episodeFilename()}"",
         )
         val duration = ffProbe.getAllLogsAsString().trim().toFloat()
-// ANZ <--
         val second = duration.toInt() / 2
 
         com.arthenica.ffmpegkit.FFmpegKit.execute(
-            "-ss $second -i \"${episodeFilename()}\" -frames:v 1 -update true \"$outFile\" -y",
+            "-ss $second -i "${episodeFilename()}" -frames:v 1 -update true "$outFile" -y",
         )
 
         if (tempFile.length() > 0L) {
@@ -322,39 +429,11 @@ actual class LocalAnimeSource(
         }
     }
 
-    private fun updateEpisodeThumbnailFromVideo(episode: SEpisode, anime: SAnime) {
-        val tempFile = File.createTempFile(
-            "tmp_",
-            anime.title + episode.name + DEFAULT_THUMBNAIL_NAME,
-        )
-        val outFile = tempFile.path
-
-        val episodeName = episode.url.split('/', limit = 2).last()
-        val animeDir = fileSystem.getAnimeDirectory(anime.url)!!
-        val episodeFile = animeDir.findFile(episodeName)!!
-        val episodeFilename = { episodeFile.toFFmpegString(context) }
-
-// ANZ -->
-        val ffProbe = com.arthenica.ffmpegkit.FFprobeKit.execute(
-            "-v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 \"${episodeFilename()}\"",
-        )
-        val duration = ffProbe.getAllLogsAsString().trim().toFloat()
-// ANZ <--
-        val second = duration.toInt() / 2
-
-        com.arthenica.ffmpegkit.FFmpegKit.execute(
-            "-ss $second -i \"${episodeFilename()}\" -frames:v 1 -update true \"$outFile\" -y",
-        )
-
-        if (tempFile.length() > 0L) {
-            thumbnailManager.update(anime, episode, tempFile.inputStream())
-        }
-    }
-
     companion object {
         const val ID = 0L
         const val HELP_URL = "https://aniyomi.org/help/guides/local-anime/"
 
+        private val SEASON_REGEX = Regex("""(?i)(?:^|\b|\s|\[|_)(?:s|season\s*)(\d+)(?:\s|e|x|\||-|\.|\b|\]|_|$)""")
         private const val DEFAULT_COVER_NAME = "cover.jpg"
         private const val DEFAULT_THUMBNAIL_NAME = "thumbnail.jpg"
         private val LATEST_THRESHOLD = TimeUnit.MILLISECONDS.convert(7, TimeUnit.DAYS)
