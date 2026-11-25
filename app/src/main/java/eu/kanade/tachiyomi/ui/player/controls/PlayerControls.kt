@@ -693,6 +693,7 @@ fun PlayerControls(
                     )
                 }
 
+                                /*
                 val thumbnailImage by viewModel.thumbnailImage.collectAsState()
                 // ANZ -->
                 ThumbnailPreview(
@@ -706,6 +707,8 @@ fun PlayerControls(
                     },
                 )
                 // ANZ <--
+                */
+
             }
         }
 
