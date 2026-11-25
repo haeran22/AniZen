@@ -414,14 +414,14 @@ actual class LocalAnimeSource(
         val episodeFile = animeDir.findFile(episodeName) ?: return
         val episodeFilename = { episodeFile.toFFmpegString(context) }
 
-        val ffProbe = com.arthenica.ffmpegkit.FFprobeKit.execute(
-            "-v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "${episodeFilename()}"",
+          val ffProbe = com.arthenica.ffmpegkit.FFprobeKit.execute(
+            """-v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "${episodeFilename()}"""",
         )
         val duration = ffProbe.getAllLogsAsString().trim().toFloat()
         val second = duration.toInt() / 2
 
         com.arthenica.ffmpegkit.FFmpegKit.execute(
-            "-ss $second -i "${episodeFilename()}" -frames:v 1 -update true "$outFile" -y",
+            """-ss $second -i "${episodeFilename()}" -frames:v 1 -update true "$outFile" -y""",
         )
 
         if (tempFile.length() > 0L) {
