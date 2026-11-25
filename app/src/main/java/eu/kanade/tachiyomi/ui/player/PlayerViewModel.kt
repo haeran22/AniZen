@@ -2218,11 +2218,13 @@ class PlayerViewModel @JvmOverloads constructor(
 
         qualityIndex = Pair(hosterIndex, videoIndex)
 
-        // ANZ -->
-        viewModelScope.launchIO {
-            loadThumbnails(resolvedVideo, source)
-        }
-        // ANZ <--
+ // ANZ -->
+/*
+viewModelScope.launchIO {
+    loadThumbnails(resolvedVideo, source)
+}
+*/
+
 
         // ANK --> Playback resumed, so drop any postponed selection
         hasPendingVideoFallback.set(false)
@@ -3059,6 +3061,7 @@ class PlayerViewModel @JvmOverloads constructor(
 
     // ANZ -->
     suspend fun loadThumbnails(video: Video, source: AnimeSource?) {
+        return
         thumbnailFetchJob?.cancel()
         _thumbnailImage.update { null }
         thumbnailInfo.update { null }
@@ -3094,6 +3097,7 @@ class PlayerViewModel @JvmOverloads constructor(
     }
 
     fun fetchThumbnailTile(pos: Float) {
+        return
         val thumbInfo = thumbnailInfo.value ?: return
         val posMs = (pos * 1000).toLong()
         val info = thumbInfo.tileInfo.lastOrNull { it.timeMs <= posMs } ?: thumbInfo.tileInfo.firstOrNull() ?: return
