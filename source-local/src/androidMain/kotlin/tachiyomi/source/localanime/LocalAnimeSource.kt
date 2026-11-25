@@ -96,21 +96,14 @@ actual class LocalAnimeSource(
             }
     }
 
-    private fun findCoverUri(dirUrl: String): String? {
+        private fun findCoverUri(dirUrl: String): String? {
         coverManager.find(dirUrl)?.let { return it.uri.toString() }
-        val imageExts = setOf("jpg", "jpeg", "png", "webp")
+        val validNames = setOf("cover", "poster", "folder")
         val files = fileSystem.getFilesInAnimeDirectory(dirUrl)
         val coverFile = files.firstOrNull {
-            it.isFile &&
-                it.extension?.lowercase() in imageExts &&
-                it.nameWithoutExtension.equals("cover", ignoreCase = true)
+            it.isFile && it.nameWithoutExtension.equals("cover", ignoreCase = true)
         } ?: files.firstOrNull {
-            it.isFile &&
-                it.extension?.lowercase() in imageExts &&
-                (
-                    it.nameWithoutExtension.equals("poster", ignoreCase = true) ||
-                        it.nameWithoutExtension.equals("folder", ignoreCase = true)
-                    )
+            it.isFile && validNames.contains(it.nameWithoutExtension?.lowercase())
         }
         return coverFile?.uri?.toString()
     }
