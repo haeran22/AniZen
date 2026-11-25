@@ -21,11 +21,27 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
-      - name: Build Debug APK
-        run: ./gradlew assembleDebug -Pinclude-telemetry=false --no-daemon
+      - name: Build Release APK
+        run: ./gradlew assembleRelease -Pinclude-telemetry=false --no-daemon
+
+      - name: Sign Unsigned APKs (if needed)
+        run: |
+          APKSIGNER=$(find "$ANDROID_HOME/build-tools" -name "apksigner" | sort -V | tail -n 1)
+          KEYSTORE="$HOME/.android/debug.keystore"
+          if [ ! -f "$KEYSTORE" ]; then
+            mkdir -p "$HOME/.android"
+            keytool -genkey -v -keystore "$KEYSTORE" -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
+          fi
+          for apk in app/build/outputs/apk/release/*-unsigned.apk; do
+            if [ -f "$apk" ]; then
+              signed="${apk/-unsigned.apk/.apk}"
+              "$APKSIGNER" sign --ks "$KEYSTORE" --ks-pass pass:android --ks-key-alias androiddebugkey --key-pass pass:android --out "$signed" "$apk"
+              rm -f "$apk"
+            fi
+          done
 
       - name: Upload APK Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: AniZen-Bangumi-Fix
-          path: app/build/outputs/apk/debug/*.apk
+          name: AniZen-Personal-Release
+          path: app/build/outputs/apk/release/*.apk
