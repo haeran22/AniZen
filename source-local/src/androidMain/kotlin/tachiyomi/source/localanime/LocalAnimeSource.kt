@@ -113,7 +113,7 @@ actual class LocalAnimeSource(
 
     override suspend fun getLatestUpdates(page: Int) = getSearchAnime(page, "", LatestFilters)
 
-    override suspend fun getSearchAnime(
+        override suspend fun getSearchAnime(
         page: Int,
         query: String,
         filters: FilterList,
@@ -167,12 +167,41 @@ actual class LocalAnimeSource(
             .map { animeDir ->
                 async {
                     val dirName = animeDir.name.orEmpty()
-                    val hasSeasonFolders = !dirName.contains('/') && getSeasonSubdirectories(dirName).isNotEmpty()
+                    val dirFiles = animeDir.listFiles().orEmpty().toList()
+                    val hasSeasonFolders = dirFiles.any { it.isDirectory && !it.name.orEmpty().startsWith('.') }
+
+                    val coverFile = dirFiles.firstOrNull {
+                        it.isFile && it.nameWithoutExtension.equals("cover", ignoreCase = true)
+                    } ?: dirFiles.firstOrNull {
+                        it.isFile && (
+                            it.nameWithoutExtension.equals("poster", ignoreCase = true) ||
+                                it.nameWithoutExtension.equals("folder", ignoreCase = true)
+                            )
+                    }
+
                     SAnime.create().apply {
                         title = dirName
                         url = dirName
                         fetch_type = if (hasSeasonFolders) FetchType.Seasons else FetchType.Episodes
-                        thumbnail_url = findCoverUri(dirName)
+                        thumbnail_url = coverFile?.uri?.toString() ?: coverManager.find(dirName)?.uri?.toString()
+
+                        dirFiles
+                            .firstOrNull {
+                                it.extension == "json" &&
+                                    (it.nameWithoutExtension == "details" || it.nameWithoutExtension == "info")
+                            }
+                            ?.let { file ->
+                                runCatching {
+                                    json.decodeFromStream<AnimeDetails>(file.openInputStream()).run {
+                                        title?.let { this@apply.title = it }
+                                        author?.let { this@apply.author = it }
+                                        artist?.let { this@apply.artist = it }
+                                        description?.let { this@apply.description = it }
+                                        genre?.let { this@apply.genre = it.joinToString() }
+                                        status?.let { this@apply.status = it }
+                                    }
+                                }
+                            }
                     }
                 }
             }
@@ -180,6 +209,7 @@ actual class LocalAnimeSource(
 
         AnimesPage(animes.toList(), false)
     }
+
 
     // Old fetch functions
 
