@@ -6,10 +6,16 @@ import kotlinx.serialization.Serializable
 @Serializable
 class EpisodeDetails(
     val episode_number: Float,
+    val season: Int? = null,
+    @SerialName("season_number")
+    val season_number: Int? = null,
     val name: String? = null,
     val date_upload: String? = null,
     val scanlator: String? = null,
     val summary: String? = null,
     @SerialName("preview_url")
     val preview_url: String? = null,
-)
+) {
+    val resolvedSeason: Int?
+        get() = season ?: season_number
+}
