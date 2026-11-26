@@ -150,7 +150,7 @@ class DownloadManager(
      * @param autoStart whether to start the downloader after enqueuing the episodes.
      * @param alt whether to use the alternative downloader
      */
-       fun downloadEpisodes(
+    fun downloadEpisodes(
         anime: Anime,
         episodes: List<Episode>,
         autoStart: Boolean = true,
@@ -193,7 +193,7 @@ class DownloadManager(
      * @param episode the downloaded episode.
      * @return an observable containing the list of pages from the episode.
      */
-      fun buildVideo(source: Source, anime: Anime, episode: Episode): Video {
+    fun buildVideo(source: Source, anime: Anime, episode: Episode): Video {
         val episodeDir = provider.findEpisodeDir(
             episode.name,
             episode.scanlator,
@@ -230,13 +230,12 @@ class DownloadManager(
                 }
         }
 
-       val video = Video(
-    videoFile.uri.toString(),
-    "download: ${videoFile.name.orEmpty()}",
-).apply {
-    status = Video.State.READY
-}
-
+        val video = Video(
+            videoFile.uri.toString(),
+            "download: ${videoFile.name.orEmpty()}",
+        ).apply {
+            status = Video.State.READY
+        }
 
         return video.copy(initialized = true, subtitleTracks = subtitleTracks)
     }
@@ -393,10 +392,6 @@ class DownloadManager(
             val sandboxRoot = context.getExternalFilesDir("downloads")
             if (sandboxRoot != null && sandboxRoot.exists()) {
                 val animeDirname = provider.getAnimeDirName(anime.ogTitle)
-                // Since sandbox doesn't have an anime subfolder structure usually based on our implementation,
-                // we should at least try to clean up if we had any logic for it.
-                // But according to downloadEpisode, we use episodeDirname directly under sandboxRoot.
-                // To be safe, we'd need to know all episodes, but usually deleteAnime is called when everything is already gone.
             }
             // KMK <--
 
