@@ -158,7 +158,7 @@ class DownloadProvider(
      * @param anime the anime of the episode.
      * @param source the source of the episode.
      */
-       fun findEpisodeDirs(episodes: List<Episode>, anime: Anime, source: Source): Pair<UniFile?, List<UniFile>> {
+         fun findEpisodeDirs(episodes: List<Episode>, anime: Anime, source: Source): Pair<UniFile?, List<UniFile>> {
         val animeDir = findAnimeDir(if (source.isLocal()) anime.url else anime.ogTitle, source)
             ?: return null to emptyList()
         val allFiles = animeDir.listFiles().orEmpty()
@@ -196,21 +196,6 @@ class DownloadProvider(
         }
     }
 
-        return animeDir to episodes.mapNotNull { episode ->
-            val exact = getValidEpisodeDirNames(episode.name, episode.scanlator).firstNotNullOfOrNull { filesByName[it] }
-            if (exact != null) return@mapNotNull exact
-
-            if (episode.isRecognizedNumber) {
-                allFiles.firstOrNull { file ->
-                    val name = file.name ?: return@firstOrNull false
-                    parseEpisodeNumberFromDir(anime.ogTitle, name, episode.scanlator) == episode.episodeNumber
-                }
-            } else {
-                null
-            }
-        }
-    }
-
     /**
      * Returns the download directory name for a source.
      *
@@ -219,6 +204,7 @@ class DownloadProvider(
     fun getSourceDirName(source: Source): String {
         return DiskUtil.buildValidFilename(source.toString())
     }
+
 
     /**
      * Returns the download directory name for an anime.
