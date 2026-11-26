@@ -1417,7 +1417,7 @@ class AnimeScreenModel(
         }
     }
 
-       private fun List<Episode>.toEpisodeListItems(anime: Anime): List<EpisodeList.Item> {
+        private fun List<Episode>.toEpisodeListItems(anime: Anime): List<EpisodeList.Item> {
         val isLocal = anime.isLocal()
         val downloadedEpisodeDirs = if (isLocal) emptySet() else downloadManager.getDownloadedEpisodeDirs(anime)
         return map { episode ->
@@ -1426,7 +1426,7 @@ class AnimeScreenModel(
                 true
             } else if (downloadedEpisodeDirs.isNotEmpty()) {
                 downloadProvider.getEpisodeFileBaseName(anime.ogTitle, episode.name) in downloadedEpisodeDirs ||
-                    downloadProvider.getValidEpisodeDirNames(episode.name, episode.scanlator).any { it in downloadedEpisodeDirs } ||
+                    downloadProvider.getValidEpisodeDirNames(episode.name, episode.scanlator).any { dirName -> dirName in downloadedEpisodeDirs } ||
                     (
                         episode.isRecognizedNumber &&
                             downloadedEpisodeDirs.any { dirName ->
