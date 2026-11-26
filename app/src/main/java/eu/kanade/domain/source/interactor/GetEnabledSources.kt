@@ -23,8 +23,8 @@ class GetEnabledSources(
             preferences.lastUsedSource().changes(),
             repository.getSources(),
         ) { pinnedSourceIds, enabledLanguages, disabledSources, lastUsedSource, sources ->
-            sources
-                .filter { it.lang in enabledLanguages || it.id == LocalAnimeSource.ID }
+            s            sources
+                .filter { it.lang in enabledLanguages || it.id in LocalAnimeSource.ALL_IDS }
                 .filterNot { it.id.toString() in disabledSources }
                 .sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { it.name })
                 .flatMap {
