@@ -23,6 +23,10 @@ import tachiyomi.domain.source.model.StubSource
 import tachiyomi.domain.source.repository.StubSourceRepository
 import tachiyomi.domain.source.service.SourceManager
 import tachiyomi.source.localanime.LocalAnimeSource
+import tachiyomi.domain.storage.service.StorageManager
+import tachiyomi.source.localanime.image.LocalAnimeSourceCoverManager
+import tachiyomi.source.localanime.image.LocalAnimeSourceEpisodeThumbnailManager
+import tachiyomi.source.localanime.io.LocalAnimeSourceFileSystem
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
 import uy.kohesive.injekt.injectLazy
@@ -64,7 +68,11 @@ class AndroidSourceManager(
             }.collectLatest { (extensions, isExtensionManagerInitialized) ->
                 if (!isExtensionManagerInitialized) return@collectLatest
 
-                                val mutableMap = ConcurrentHashMap<Long, Source>(
+                                val storageManager: StorageManager = Injekt.get()
+                val pelisFileSystem = LocalAnimeSourceFileSystem(storageManager) { it.getLocalPelisDirectory() }
+                val seriesFileSystem = LocalAnimeSourceFileSystem(storageManager) { it.getLocalSeriesDirectory() }
+
+                val mutableMap = ConcurrentHashMap<Long, Source>(
                     mapOf(
                         LocalAnimeSource.ID to LocalAnimeSource(
                             context,
@@ -72,9 +80,26 @@ class AndroidSourceManager(
                             Injekt.get(),
                             Injekt.get(),
                         ),
+                        LocalAnimeSource.PELIS_ID to LocalAnimeSource(
+                            context = context,
+                            fileSystem = pelisFileSystem,
+                            coverManager = LocalAnimeSourceCoverManager(context, pelisFileSystem),
+                            thumbnailManager = LocalAnimeSourceEpisodeThumbnailManager(context, pelisFileSystem),
+                            id = LocalAnimeSource.PELIS_ID,
+                            name = "Local Pelis",
+                        ),
+                        LocalAnimeSource.SERIES_ID to LocalAnimeSource(
+                            context = context,
+                            fileSystem = seriesFileSystem,
+                            coverManager = LocalAnimeSourceCoverManager(context, seriesFileSystem),
+                            thumbnailManager = LocalAnimeSourceEpisodeThumbnailManager(context, seriesFileSystem),
+                            id = LocalAnimeSource.SERIES_ID,
+                            name = "Local Series",
+                        ),
                         exh.source.MERGED_SOURCE_ID to exh.source.MergedAnimeSource(),
                     ),
                 )
+
 
                 extensions.forEach { extension: eu.kanade.tachiyomi.extension.model.Extension.Installed ->
                     extension.sources.forEach {
