@@ -118,7 +118,7 @@ class DownloadProvider(
      * @param source the source of the episode.
      * @param episodeNumber the episode number to fallback to if the name was changed
      */
-    fun findEpisodeDir(
+       fun findEpisodeDir(
         episodeName: String,
         episodeScanlator: String?,
         animeTitle: String,
@@ -129,6 +129,11 @@ class DownloadProvider(
         if (source.isLocal()) {
             return animeDir?.listFiles().orEmpty().find { it.nameWithoutExtension == episodeName }
         }
+        val flatBaseName = getEpisodeFileBaseName(animeTitle, episodeName)
+        val flatFile = animeDir?.listFiles().orEmpty()
+            .firstOrNull { !it.isDirectory && it.nameWithoutExtension == flatBaseName && it.hasPlayableVideo() }
+        if (flatFile != null) return flatFile
+
         val exact = getValidEpisodeDirNames(episodeName, episodeScanlator).asSequence()
             .mapNotNull { animeDir?.findFile(it) }
             .firstOrNull { it.hasPlayableVideo() }
@@ -145,6 +150,7 @@ class DownloadProvider(
         return null
     }
 
+
     /**
      * Returns a list of downloaded directories for the episodes that exist.
      *
@@ -152,7 +158,7 @@ class DownloadProvider(
      * @param anime the anime of the episode.
      * @param source the source of the episode.
      */
-    fun findEpisodeDirs(episodes: List<Episode>, anime: Anime, source: Source): Pair<UniFile?, List<UniFile>> {
+       fun findEpisodeDirs(episodes: List<Episode>, anime: Anime, source: Source): Pair<UniFile?, List<UniFile>> {
         val animeDir = findAnimeDir(if (source.isLocal()) anime.url else anime.ogTitle, source)
             ?: return null to emptyList()
         val allFiles = animeDir.listFiles().orEmpty()
@@ -168,6 +174,28 @@ class DownloadProvider(
                 fileByUrl ?: allFiles.find { it.nameWithoutExtension == episode.name }
             }
         }
+
+        return animeDir to episodes.flatMap { episode ->
+            val flatBaseName = getEpisodeFileBaseName(anime.ogTitle, episode.name)
+            val flatMatches = allFiles.filter { !it.isDirectory && it.nameWithoutExtension?.startsWith(flatBaseName) == true }
+            if (flatMatches.isNotEmpty()) return@flatMap flatMatches
+
+            val exact = getValidEpisodeDirNames(episode.name, episode.scanlator).firstNotNullOfOrNull { filesByName[it] }
+            if (exact != null) return@flatMap listOf(exact)
+
+            if (episode.isRecognizedNumber) {
+                listOfNotNull(
+                    allFiles.firstOrNull { file ->
+                        val name = file.name ?: return@firstOrNull false
+                        parseEpisodeNumberFromDir(anime.ogTitle, name, episode.scanlator) == episode.episodeNumber
+                    },
+                )
+            } else {
+                emptyList()
+            }
+        }
+    }
+
         return animeDir to episodes.mapNotNull { episode ->
             val exact = getValidEpisodeDirNames(episode.name, episode.scanlator).firstNotNullOfOrNull { filesByName[it] }
             if (exact != null) return@mapNotNull exact
