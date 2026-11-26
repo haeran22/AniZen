@@ -858,22 +858,18 @@ class Downloader(
     }
     // ANZ <--
 
-    private suspend fun finalizeDownload(
+     private suspend fun finalizeDownload(
         download: Download,
         videoFile: UniFile,
         publicDir: UniFile,
         filename: String,
-        // ANZ -->
-        // Container to advertise for the finished file. A subtitle remux always outputs
-        // Matroska, so the caller must be able to override the extension derived from the URL.
         overrideExt: String? = null,
-        // ANZ <--
     ) {
         download.status = Download.State.FINALIZING
         download.progress = 0
         notifyProgress(download)
 
-                val baseTitle = DiskUtil.buildValidFilename("${download.anime.ogTitle} - ${download.episode.name}")
+        val baseTitle = DiskUtil.buildValidFilename("${download.anime.ogTitle} - ${download.episode.name}")
         val finalExt = overrideExt ?: if (
             download.video?.videoUrl?.contains(".mp4") == true &&
             download.engineType != "DASH"
@@ -895,8 +891,6 @@ class Downloader(
 
         if (!isAlreadyAtDestination) {
             existingFile?.delete()
-            // Remove legacy per-episode folder if re-downloading
-            publicDir.findFile(filename)?.delete()
 
             val localSource = getLocalFile(videoFile)
             val localDestDir = if (publicDir.uri.scheme == "file") getLocalFile(publicDir) else null
@@ -921,7 +915,7 @@ class Downloader(
             }
         }
 
-        // Copy sidecar subtitles (if not remuxed) next to the video file with matching base name
+        // Copy sidecar subtitles (if not remuxed) inside the episode directory
         val videoFilename = DiskUtil.buildValidFilename(download.episode.name)
         val sandboxDir = getLocalFile(videoFile)?.parentFile ?: File(context.getExternalFilesDir("downloads"), filename)
         sandboxDir.listFiles()?.forEach { file ->
@@ -944,8 +938,10 @@ class Downloader(
             }
         }
 
-        // Clean up temporary directory created early in downloadEpisode
-        publicDir.findFile(filename + TMP_DIR_SUFFIX)?.delete()
+        // Rename temporary episode folder (Episode_tmp -> Episode)
+        val animeDir = provider.getAnimeDir(download.anime.ogTitle, download.source)
+        animeDir.findFile(filename)?.delete()
+        publicDir.renameTo(filename)
 
         if (isLocalFile(videoFile)) {
             getLocalFile(videoFile)?.parentFile?.deleteRecursively()
@@ -958,8 +954,9 @@ class Downloader(
         store.remove(download)
         notifier.dismissProgress(download)
 
-        cache.addEpisode(baseTitle, publicDir, download.anime)
+        cache.addEpisode(filename, animeDir, download.anime)
     }
+
 
     private suspend fun copyUniFile(source: UniFile, dest: UniFile, download: Download) {
         source.openInputStream().use { input ->
