@@ -124,44 +124,48 @@ class EpisodeLoader {
          * @param anime the anime of the episode.
          * @param source the source of the anime.
          */
-        private fun getHostersOnDownloaded(
+                private suspend fun getHostersOnDownloaded(
             episode: Episode,
             anime: Anime,
             source: AnimeSource,
         ): List<Hoster> {
-            val downloadManager: DownloadManager = Injekt.get()
-            return try {
-                val video = downloadManager.buildVideo(source, anime, episode)
-                listOf(video).toHosterList()
-            } catch (e: Throwable) {
-                emptyList()
+            return withIOContext {
+                val downloadManager: DownloadManager = Injekt.get()
+                try {
+                    val video = downloadManager.buildVideo(source, anime, episode)
+                    listOf(video).toHosterList()
+                } catch (e: Throwable) {
+                    emptyList()
+                }
             }
         }
 
-        /**
-         * Returns the hoster when the [episode] is from local source.
-         *
-         * @param episode the episode being parsed.
-         */
-                private fun getHostersOnLocal(
+        private suspend fun getHostersOnLocal(
             episode: Episode,
             source: LocalAnimeSource,
         ): List<Hoster> {
-            return try {
-                val (animeDirName, episodeName) = episode.url.split('/', limit = 2)
-                val videoFile = source.fileSystem.getAnimeDirectory(animeDirName)
-                    ?.findFile(episodeName)
-                val videoUri = videoFile!!.uri
+            return withIOContext {
+                try {
+                    val (animeDirName, relativePath) = episode.url.split('/', limit = 2)
+                    var currentFile = source.fileSystem.getAnimeDirectory(animeDirName)
+                    for (segment in relativePath.split('/')) {
+                        if (segment.isNotEmpty()) {
+                            currentFile = currentFile?.findFile(segment)
+                        }
+                    }
+                    val videoUri = currentFile!!.uri
 
-                val video = Video(
-                    videoUri.toString(),
-                    "${source.name}: ${episode.url}",
-                )
-                listOf(video).toHosterList()
-            } catch (e: Exception) {
-                emptyList()
+                    val video = Video(
+                        videoUri.toString(),
+                        "${source.name}: ${episode.url}",
+                    )
+                    listOf(video).toHosterList()
+                } catch (e: Exception) {
+                    emptyList()
+                }
             }
         }
+
 
 
         /**
