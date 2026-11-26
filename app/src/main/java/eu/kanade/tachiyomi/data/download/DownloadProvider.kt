@@ -118,7 +118,7 @@ class DownloadProvider(
      * @param source the source of the episode.
      * @param episodeNumber the episode number to fallback to if the name was changed
      */
-       fun findEpisodeDir(
+    fun findEpisodeDir(
         episodeName: String,
         episodeScanlator: String?,
         animeTitle: String,
@@ -150,7 +150,6 @@ class DownloadProvider(
         return null
     }
 
-
     /**
      * Returns a list of downloaded directories for the episodes that exist.
      *
@@ -158,7 +157,7 @@ class DownloadProvider(
      * @param anime the anime of the episode.
      * @param source the source of the episode.
      */
-         fun findEpisodeDirs(episodes: List<Episode>, anime: Anime, source: Source): Pair<UniFile?, List<UniFile>> {
+    fun findEpisodeDirs(episodes: List<Episode>, anime: Anime, source: Source): Pair<UniFile?, List<UniFile>> {
         val animeDir = findAnimeDir(if (source.isLocal()) anime.url else anime.ogTitle, source)
             ?: return null to emptyList()
         val allFiles = animeDir.listFiles().orEmpty()
@@ -205,7 +204,6 @@ class DownloadProvider(
         return DiskUtil.buildValidFilename(source.toString())
     }
 
-
     /**
      * Returns the download directory name for an anime.
      *
@@ -230,6 +228,7 @@ class DownloadProvider(
             },
         )
     }
+
     fun getEpisodeFileBaseName(animeTitle: String, episodeName: String): String {
         return DiskUtil.buildValidFilename("$animeTitle - ${sanitizeEpisodeName(episodeName)}")
     }
@@ -297,8 +296,14 @@ class DownloadProvider(
     ): Long? {
         if (source == null) return null
         return if (source.isLocal()) {
-            val (animeDirName, episodeDirName) = episodeUrl?.split('/', limit = 2) ?: return null
-            localFileSystem.getBaseDirectory()?.findFile(animeDirName)?.findFile(episodeDirName)?.size()
+            val (animeDirName, relativePath) = episodeUrl?.split('/', limit = 2) ?: return null
+            var currentFile = localFileSystem.getBaseDirectory()?.findFile(animeDirName)
+            for (segment in relativePath.split('/')) {
+                if (segment.isNotEmpty()) {
+                    currentFile = currentFile?.findFile(segment)
+                }
+            }
+            currentFile?.size()
         } else {
             findEpisodeDir(episodeName, episodeScanlator, animeTitle, source, episodeNumber)?.size()
         }
