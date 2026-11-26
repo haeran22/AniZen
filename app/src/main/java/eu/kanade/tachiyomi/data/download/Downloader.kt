@@ -642,14 +642,18 @@ class Downloader(
             } finally {
                 downloadHttpServer?.stop()
             }
-        } catch (e: Exception) {
-            logcat(LogPriority.ERROR, e) { "Download failed" }
-            if (e !is CancellationException) {
-                download.status = Download.State.ERROR
-                notifyProgress(download)
-                notifier.onError(e.message)
-            }
-        }
+            } catch (e: Exception) {
+         logcat(LogPriority.ERROR, e) { "Download failed" }
+         if (e !is CancellationException) {
+             if (e.message?.contains("403") == true || e.message?.contains("410") == true) {
+                 download.video = null
+             }
+             download.status = Download.State.ERROR
+             notifyProgress(download)
+             notifier.onError(e.message)
+         }
+     }
+
     }
 
     private fun checkFreeSpace(dir: File, requiredSize: Long) {
@@ -1183,6 +1187,11 @@ class Downloader(
         val video = download.video!!
         val client = networkHelper.downloadClient
         val headers = getHeaders(video)
+         val fallbackHeaders = headers.newBuilder()
+         .removeAll("Referer")
+         .removeAll("Origin")
+         .build()
+
 
         var playlistUrl = video.videoUrl
         var lines: List<String>
@@ -1255,7 +1264,7 @@ class Downloader(
                 launch {
                     // ANZ -->
                     // Reuse Cipher instance per worker thread to avoid 1500x Cipher.getInstance reflection
-                    val workerCipher = if (secretKey != null) javax.crypto.Cipher.getInstance("AES/CBC/PKCS5Padding") else null
+                                        val workerCipher = if (secretKey != null) javax.crypto.Cipher.getInstance("AES/CBC/PKCS5Padding") else null
                     // ANZ <--
                     while (isActive) {
                         if (download.status == Download.State.PAUSED) break
@@ -1275,10 +1284,15 @@ class Downloader(
                             continue
                         }
 
+                        var useFallbackHeaders = false
                         retry(times = 5) {
                             // ANZ -->
-                            client.newCall(Request.Builder().url(segUrl).headers(headers).build()).execute().use { res ->
-                                if (res.code == 429) {
+                            val reqHeaders = if (useFallbackHeaders) fallbackHeaders else headers
+                            client.newCall(Request.Builder().url(segUrl).headers(reqHeaders).build()).execute().use { res ->
+                                if (res.code == 429 || res.code == 403) {
+                                    if (res.code == 403) {
+                                        useFallbackHeaders = !useFallbackHeaders
+                                    }
                                     kotlinx.coroutines.delay(500L)
                                 }
                                 if (!res.isSuccessful) throw IOException("Segment failed: ${res.code}")
@@ -1320,6 +1334,7 @@ class Downloader(
                 }
             }
         }
+
 
         download.status = if (secretKey != null) Download.State.DECRYPTING else Download.State.MERGING
         download.progress = 0
