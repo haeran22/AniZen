@@ -869,8 +869,7 @@ class Downloader(
         download.progress = 0
         notifyProgress(download)
 
-        val videoFilename = DiskUtil.buildValidFilename(download.episode.name)
-        // ANZ -->
+                val baseTitle = DiskUtil.buildValidFilename("${download.anime.ogTitle} - ${download.episode.name}")
         val finalExt = overrideExt ?: if (
             download.video?.videoUrl?.contains(".mp4") == true &&
             download.engineType != "DASH"
@@ -879,77 +878,58 @@ class Downloader(
         } else {
             "mkv"
         }
-        // ANZ <--
-        val finalName = "$videoFilename.$finalExt"
+        val finalName = "$baseTitle.$finalExt"
 
-        // Create temporary episode directory
-        val tmpFilename = filename + TMP_DIR_SUFFIX
-        val destDir = publicDir.findFile(tmpFilename)
-            ?: publicDir.createDirectory(tmpFilename)
-            ?: throw IOException("Could not create temporary episode directory: $tmpFilename")
-
-        // Check if the file is already in the destination (e.g. direct merge)
-        val destFile = destDir.findFile(finalName)
-
-        // Salvage: an interrupted finalize (crash, failed rename) may have already placed the
-        // complete video inside the temp directory. Identical content is reused instead of
-        // copying it again — URI identity is lost across storage zones, so sizes are compared.
-        val isAlreadyAtDestination = (destFile != null && destFile.uri == videoFile.uri) ||
+        val existingFile = publicDir.findFile(finalName)
+        val isAlreadyAtDestination = (existingFile != null && existingFile.uri == videoFile.uri) ||
             (
-                destFile != null &&
-                    destFile.length() > 0 &&
+                existingFile != null &&
+                    existingFile.length() > 0 &&
                     videoFile.length() > 0 &&
-                    destFile.length() == videoFile.length()
+                    existingFile.length() == videoFile.length()
                 )
 
         if (!isAlreadyAtDestination) {
-            // CRITICAL: Prevent file bloating
-            destFile?.delete()
-            destDir.findFile("$videoFilename.tmp")?.delete()
+            existingFile?.delete()
+            // Remove legacy per-episode folder if re-downloading
+            publicDir.findFile(filename)?.delete()
 
-            // FAST-PATH: Instant rename if the destination is a real filesystem path. SAF
-            // documents also expose a filePath, but java.io renames into them fail with EPERM
-            // under scoped storage — those must use the stream copy below instead.
             val localSource = getLocalFile(videoFile)
-            val localDestDir = if (destDir.uri.scheme == "file") getLocalFile(destDir) else null
+            val localDestDir = if (publicDir.uri.scheme == "file") getLocalFile(publicDir) else null
 
             if (localSource != null && localDestDir != null) {
                 val localDestFile = File(localDestDir, finalName)
-                if (localSource.renameTo(localDestFile)) {
-                    logcat(LogPriority.INFO) { "Finalize: Instant rename success: ${localSource.name} -> ${localDestFile.name}" }
-                } else {
-                    // Fallback to byte copy if rename fails
+                if (!localSource.renameTo(localDestFile)) {
                     copyUniFile(
                         videoFile,
-                        destDir.createFile(finalName)
+                        publicDir.createFile(finalName)
                             ?: throw IOException("Could not create destination file: $finalName"),
                         download,
                     )
                 }
             } else {
-                // SAF Path: Direct byte-by-byte copy
                 copyUniFile(
                     videoFile,
-                    destDir.createFile(finalName)
+                    publicDir.createFile(finalName)
                         ?: throw IOException("Could not create destination file: $finalName"),
                     download,
                 )
             }
         }
 
-        // Pro-Active: Move soft subtitles to the destination directory
+        // Copy sidecar subtitles (if not remuxed) next to the video file with matching base name
+        val videoFilename = DiskUtil.buildValidFilename(download.episode.name)
         val sandboxDir = getLocalFile(videoFile)?.parentFile ?: File(context.getExternalFilesDir("downloads"), filename)
-        val baseName = videoFilename
-        // ANZ -->
         sandboxDir.listFiles()?.forEach { file ->
             val ext = file.extension.lowercase()
-            if (file.nameWithoutExtension.startsWith(baseName) &&
+            if (file.nameWithoutExtension.startsWith(videoFilename) &&
                 file.name != videoFile.name &&
                 ext in SIDECAR_SUBTITLE_EXTENSIONS &&
                 !file.name.endsWith(".part") &&
                 !file.name.endsWith(".tmp")
             ) {
-                val subFile = destDir.createFile(file.name)
+                val subSuffix = file.name.removePrefix(videoFilename)
+                val subFile = publicDir.createFile("$baseTitle$subSuffix")
                 if (subFile != null) {
                     file.inputStream().use { input ->
                         subFile.openOutputStream().use { output ->
@@ -959,29 +939,9 @@ class Downloader(
                 }
             }
         }
-        // ANZ <--
 
-        // Finalize: Rename directory to final name
-        val finalDir = publicDir.findFile(filename)
-        finalDir?.delete() // Cleanup if somehow exists
-        if (!destDir.renameTo(filename)) {
-            // Some SAF documents refuse directory renames. Fall back to creating the final
-            // directory, streaming the children across, and removing the temp directory.
-            logcat(LogPriority.WARN) { "Finalize: directory rename failed, falling back to stream copy: $filename" }
-            val targetDir = publicDir.createDirectory(filename)
-                ?: throw IOException("Could not create episode directory: $filename")
-            for (child in destDir.listFiles().orEmpty()) {
-                val childName = child.name ?: continue
-                val targetFile = targetDir.createFile(childName)
-                    ?: throw IOException("Could not create file while finalizing: $childName")
-                child.openInputStream().use { input ->
-                    targetFile.openOutputStream().use { output ->
-                        input.copyTo(output, 1024 * 1024)
-                    }
-                }
-            }
-            destDir.delete()
-        }
+        // Clean up temporary directory created early in downloadEpisode
+        publicDir.findFile(filename + TMP_DIR_SUFFIX)?.delete()
 
         if (isLocalFile(videoFile)) {
             getLocalFile(videoFile)?.parentFile?.deleteRecursively()
@@ -994,7 +954,7 @@ class Downloader(
         store.remove(download)
         notifier.dismissProgress(download)
 
-        cache.addEpisode(filename, publicDir, download.anime)
+        cache.addEpisode(baseTitle, publicDir, download.anime)
     }
 
     private suspend fun copyUniFile(source: UniFile, dest: UniFile, download: Download) {
