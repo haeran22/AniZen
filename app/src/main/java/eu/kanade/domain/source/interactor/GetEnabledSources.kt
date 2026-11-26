@@ -32,7 +32,7 @@ class GetEnabledSources(
                     val source = it.copy(pin = flag)
                     val toFlatten = mutableListOf(source)
                     if (source.id == lastUsedSource) {
-                        toFlatten.add(source.copy(isUsedLast = true, pin = source.pin - Pin.Actual))
+                        toFlatten.add(source.copy(isUsedLast = true, pins = source.pins - Pin.Actual))
                     }
                     toFlatten
                 }
