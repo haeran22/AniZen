@@ -5,10 +5,11 @@ import tachiyomi.domain.storage.service.StorageManager
 
 actual class LocalAnimeSourceFileSystem(
     private val storageManager: StorageManager,
+    private val baseDirectoryProvider: (StorageManager) -> UniFile? = { it.getLocalSourceDirectory() },
 ) {
 
     actual fun getBaseDirectory(): UniFile? {
-        return storageManager.getLocalSourceDirectory()
+        return baseDirectoryProvider(storageManager)
     }
 
     actual fun getFilesInBaseDirectory(): List<UniFile> {
