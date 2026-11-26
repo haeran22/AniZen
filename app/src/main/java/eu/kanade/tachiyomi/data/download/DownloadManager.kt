@@ -230,14 +230,13 @@ class DownloadManager(
                 }
         }
 
-        val video = Video(
-            videoFile.uri.toString(),
-            "download: ${videoFile.name.orEmpty()}",
-            videoFile.uri.toString(),
-            videoFile.uri,
-        ).apply {
-            status = Video.State.READY
-        }
+       val video = Video(
+    videoFile.uri.toString(),
+    "download: ${videoFile.name.orEmpty()}",
+).apply {
+    status = Video.State.READY
+}
+
 
         return video.copy(initialized = true, subtitleTracks = subtitleTracks)
     }
