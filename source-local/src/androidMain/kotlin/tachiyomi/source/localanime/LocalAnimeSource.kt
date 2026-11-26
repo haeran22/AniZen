@@ -50,13 +50,12 @@ import tachiyomi.domain.source.model.Source as DomainSource
 
 actual class LocalAnimeSource(
     private val context: Context,
-    private val fileSystem: LocalAnimeSourceFileSystem,
+    val fileSystem: LocalAnimeSourceFileSystem,
     private val coverManager: LocalAnimeSourceCoverManager,
     private val thumbnailManager: LocalAnimeSourceEpisodeThumbnailManager,
     override val id: Long = ID,
     override val name: String = context.stringResource(MR.strings.local_anime_source),
 ) : CatalogueSource, UnmeteredSource {
-
 
     private val json: Json by injectLazy()
 
@@ -67,10 +66,6 @@ actual class LocalAnimeSource(
 
     @Suppress("PrivatePropertyName")
     private val LatestFilters = FilterList(OrderBy.Latest(context))
-
-    override val name = context.stringResource(MR.strings.local_anime_source)
-
-    override val id: Long = ID
 
     override val lang = "other"
 
