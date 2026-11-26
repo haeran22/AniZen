@@ -216,6 +216,9 @@ class DownloadProvider(
             },
         )
     }
+    fun getEpisodeFileBaseName(animeTitle: String, episodeName: String): String {
+        return DiskUtil.buildValidFilename("$animeTitle - ${sanitizeEpisodeName(episodeName)}")
+    }
 
     /**
      * Return the new name for the episode (in case it's empty or blank)
