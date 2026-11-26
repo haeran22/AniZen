@@ -17,7 +17,6 @@ import tachiyomi.domain.anime.model.Anime
 import tachiyomi.domain.episode.model.Episode
 import tachiyomi.i18n.MR
 import tachiyomi.source.localanime.LocalAnimeSource
-import tachiyomi.source.localanime.io.LocalAnimeSourceFileSystem
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
 
@@ -47,7 +46,7 @@ class EpisodeLoader {
             return when {
                 isDownloaded -> getHostersOnDownloaded(episode, anime, source)
                 source is AnimeHttpSource -> getHostersOnHttp(episode, source)
-                source is LocalAnimeSource -> getHostersOnLocal(episode)
+                source is LocalAnimeSource -> getHostersOnLocal(episode, source)
                 // ANZ -->
                 else -> throw PlayerViewModel.ExceptionWithStringResource(
                     "Source not supported: ${source.name}",
@@ -144,26 +143,26 @@ class EpisodeLoader {
          *
          * @param episode the episode being parsed.
          */
-        private fun getHostersOnLocal(
+                private fun getHostersOnLocal(
             episode: Episode,
+            source: LocalAnimeSource,
         ): List<Hoster> {
             return try {
                 val (animeDirName, episodeName) = episode.url.split('/', limit = 2)
-                val fileSystem: LocalAnimeSourceFileSystem = Injekt.get()
-                val videoFile = fileSystem.getBaseDirectory()
-                    ?.findFile(animeDirName)
+                val videoFile = source.fileSystem.getAnimeDirectory(animeDirName)
                     ?.findFile(episodeName)
                 val videoUri = videoFile!!.uri
 
                 val video = Video(
                     videoUri.toString(),
-                    "Local source: ${episode.url}",
+                    "${source.name}: ${episode.url}",
                 )
                 listOf(video).toHosterList()
             } catch (e: Exception) {
                 emptyList()
             }
         }
+
 
         /**
          * Returns a list of videos of a [hoster] based on the type of [source] used.
