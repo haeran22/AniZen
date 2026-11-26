@@ -1,6 +1,7 @@
 // AY -->
 package eu.kanade.presentation.anime.components
 
+import tachiyomi.source.localanime.isLocal
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import eu.kanade.presentation.library.components.AnimeComfortableGridItem
