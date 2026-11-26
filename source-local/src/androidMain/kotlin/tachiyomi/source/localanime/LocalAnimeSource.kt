@@ -480,8 +480,9 @@ actual class LocalAnimeSource(
     }
 }
 
-fun Anime.isLocal(): Boolean = source in LocalAnimeSource.ALL_IDS
+actual fun Anime.isLocal(): Boolean = source in LocalAnimeSource.ALL_IDS
 
-fun Source.isLocal(): Boolean = id in LocalAnimeSource.ALL_IDS
+actual fun Source.isLocal(): Boolean = id in LocalAnimeSource.ALL_IDS
 
-fun DomainSource.isLocal(): Boolean = id in LocalAnimeSource.ALL_IDS
+actual fun DomainSource.isLocal(): Boolean = id in LocalAnimeSource.ALL_IDS
+
