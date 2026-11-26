@@ -197,7 +197,7 @@ class DownloadManager(
         val episodeDir =
             provider.findEpisodeDir(episode.name, episode.scanlator, if (source.isLocal()) anime.url else anime.ogTitle, source, episode.episodeNumber)
 
-        val files = if (source.isLocal() && episodeDir?.isFile == true) {
+       val files = if (episodeDir?.isFile == true) {
             listOf(episodeDir)
         } else {
             episodeDir?.listFiles().orEmpty()
