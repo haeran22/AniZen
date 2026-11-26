@@ -152,12 +152,14 @@ class DownloadCache(
             val animeDir = sourceDir.animeDirs[provider.getAnimeDirName(animeTitle)]
             if (animeDir != null) {
                 // ANZ -->
-                val snapshot = synchronized(animeDir) { animeDir.episodeDirs.toSet() }
-                val matched = provider.getValidEpisodeDirNames(
-                    episodeName,
-                    episodeScanlator,
-                ).any { it in snapshot }
+                           val snapshot = synchronized(animeDir) { animeDir.episodeDirs.toSet() }
+                val matched = provider.getEpisodeFileBaseName(animeTitle, episodeName) in snapshot ||
+                    provider.getValidEpisodeDirNames(
+                        episodeName,
+                        episodeScanlator,
+                    ).any { it in snapshot }
                 if (matched) return true
+
 
                 if (episodeNumber >= 0.0) {
                     return snapshot.any { dirName ->
