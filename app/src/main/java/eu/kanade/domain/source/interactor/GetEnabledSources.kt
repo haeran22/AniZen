@@ -4,7 +4,6 @@ import eu.kanade.domain.source.service.SourcePreferences
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
-import tachiyomi.domain.source.model.Pin
 import tachiyomi.domain.source.model.Pins
 import tachiyomi.domain.source.model.Source
 import tachiyomi.domain.source.repository.SourceRepository
@@ -23,7 +22,7 @@ class GetEnabledSources(
             preferences.lastUsedSource().changes(),
             repository.getSources(),
         ) { pinnedSourceIds, enabledLanguages, disabledSources, lastUsedSource, sources ->
-            s            sources
+            sources
                 .filter { it.lang in enabledLanguages || it.id in LocalAnimeSource.ALL_IDS }
                 .filterNot { it.id.toString() in disabledSources }
                 .sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { it.name })
@@ -32,7 +31,7 @@ class GetEnabledSources(
                     val source = it.copy(pin = flag)
                     val toFlatten = mutableListOf(source)
                     if (source.id == lastUsedSource) {
-                        toFlatten.add(source.copy(isUsedLast = true, pins = source.pins - Pin.Actual))
+                        toFlatten.add(source.copy(isUsedLast = true, pin = Pins.unpinned))
                     }
                     toFlatten
                 }
