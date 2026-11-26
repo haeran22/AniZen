@@ -193,44 +193,50 @@ class DownloadManager(
      * @param episode the downloaded episode.
      * @return an observable containing the list of pages from the episode.
      */
-    fun buildVideo(source: Source, anime: Anime, episode: Episode): Video {
-        val episodeDir =
-            provider.findEpisodeDir(episode.name, episode.scanlator, if (source.isLocal()) anime.url else anime.ogTitle, source, episode.episodeNumber)
+      fun buildVideo(source: Source, anime: Anime, episode: Episode): Video {
+        val episodeDir = provider.findEpisodeDir(
+            episode.name,
+            episode.scanlator,
+            if (source.isLocal()) anime.url else anime.ogTitle,
+            source,
+            episode.episodeNumber,
+        ) ?: throw Exception(context.stringResource(MR.strings.video_list_empty_error))
 
-       val files = if (episodeDir?.isFile == true) {
+        val allFiles = if (episodeDir.isFile) {
             listOf(episodeDir)
         } else {
-            episodeDir?.listFiles().orEmpty()
+            episodeDir.listFiles().orEmpty().toList()
+        }
+
+        val videoFile = allFiles.firstOrNull {
+            val type = it.type.orEmpty().lowercase()
+            val name = it.name.orEmpty().lowercase()
+            "video" in type || name.endsWith(".mp4") || name.endsWith(".mkv") || name.endsWith(".webm")
+        } ?: throw Exception(context.stringResource(MR.strings.video_list_empty_error))
+
+        val subtitleTracks = if (episodeDir.isFile) {
+            emptyList()
+        } else {
+            allFiles
                 .filter {
-                    val type = it.type.orEmpty().lowercase()
                     val name = it.name.orEmpty().lowercase()
-                    "video" in type || name.endsWith(".mp4") || name.endsWith(".mkv")
+                    name.endsWith(".srt") || name.endsWith(".ass") || name.endsWith(".vtt")
+                }
+                .map {
+                    eu.kanade.tachiyomi.animesource.model.Track(
+                        it.uri.toString(),
+                        it.nameWithoutExtension.orEmpty(),
+                    )
                 }
         }
 
-        if (files.isEmpty()) {
-            throw Exception(context.stringResource(MR.strings.video_list_empty_error))
-        }
-
-        val file = files[0]
-
-        val subtitleTracks = episodeDir?.listFiles().orEmpty()
-            .filter {
-                val name = it.name.orEmpty().lowercase()
-                name.endsWith(".srt") || name.endsWith(".ass") || name.endsWith(".vtt")
-            }
-            .map {
-                eu.kanade.tachiyomi.animesource.model.Track(it.uri.toString(), it.nameWithoutExtension.orEmpty())
-            }
-
         val video = Video(
-            file.uri.toString(),
-            "download: " + file.uri.toString(),
-            file.uri.toString(),
-            file.uri,
+            videoFile.uri.toString(),
+            "download: ${videoFile.name.orEmpty()}",
+            videoFile.uri.toString(),
+            videoFile.uri,
         ).apply {
             status = Video.State.READY
-            mimeType = "video/mp4"
         }
 
         return video.copy(initialized = true, subtitleTracks = subtitleTracks)
