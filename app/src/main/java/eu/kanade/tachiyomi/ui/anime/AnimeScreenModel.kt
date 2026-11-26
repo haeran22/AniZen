@@ -1426,7 +1426,7 @@ class AnimeScreenModel(
                 true
             } else if (downloadedEpisodeDirs.isNotEmpty()) {
                 downloadProvider.getEpisodeFileBaseName(anime.ogTitle, episode.name) in downloadedEpisodeDirs ||
-                    downloadProvider.getValidEpisodeDirNames(episode.name, episode.scanlator).any { dirName -> dirName in downloadedEpisodeDirs } ||
+                    downloadProvider.getValidEpisodeDirNames(episode.name, episode.scanlator).any { dirName: String -> dirName in downloadedEpisodeDirs } ||
                     (
                         episode.isRecognizedNumber &&
                             downloadedEpisodeDirs.any { dirName ->
