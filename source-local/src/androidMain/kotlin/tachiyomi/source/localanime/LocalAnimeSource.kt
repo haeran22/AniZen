@@ -53,7 +53,10 @@ actual class LocalAnimeSource(
     private val fileSystem: LocalAnimeSourceFileSystem,
     private val coverManager: LocalAnimeSourceCoverManager,
     private val thumbnailManager: LocalAnimeSourceEpisodeThumbnailManager,
+    override val id: Long = ID,
+    override val name: String = context.stringResource(MR.strings.local_anime_source),
 ) : CatalogueSource, UnmeteredSource {
+
 
     private val json: Json by injectLazy()
 
@@ -468,8 +471,11 @@ actual class LocalAnimeSource(
         }
     }
 
-    companion object {
+       companion object {
         const val ID = 0L
+        const val PELIS_ID = -1L
+        const val SERIES_ID = -2L
+        val ALL_IDS = setOf(ID, PELIS_ID, SERIES_ID)
         const val HELP_URL = "https://aniyomi.org/help/guides/local-anime/"
 
         private val SEASON_REGEX = Regex("""(?i)(?:^|\b|\s|\[|_)(?:s|season\s*)(\d+)(?:\s|e|x|\||-|\.|\b|\]|_|$)""")
@@ -479,8 +485,8 @@ actual class LocalAnimeSource(
     }
 }
 
-fun Anime.isLocal(): Boolean = source == LocalAnimeSource.ID
+fun Anime.isLocal(): Boolean = source in LocalAnimeSource.ALL_IDS
 
-fun Source.isLocal(): Boolean = id == LocalAnimeSource.ID
+fun Source.isLocal(): Boolean = id in LocalAnimeSource.ALL_IDS
 
-fun DomainSource.isLocal(): Boolean = id == LocalAnimeSource.ID
+fun DomainSource.isLocal(): Boolean = id in LocalAnimeSource.ALL_IDS
