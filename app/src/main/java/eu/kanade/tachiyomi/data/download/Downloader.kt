@@ -30,7 +30,7 @@ import eu.kanade.tachiyomi.util.subtitles.StremioSubtitleResolver
 import eu.kanade.tachiyomi.util.system.activeNetworkState
 import eu.kanade.tachiyomi.util.system.copyToClipboard
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
@@ -1190,7 +1190,9 @@ class Downloader(
             }
             return UniFile.fromFile(finalFile)!!
         }
-    }    private suspend fun anikkuFallbackDownload(
+    }    
+    
+   private suspend fun anikkuFallbackDownload(
         download: Download,
         video: Video,
         sandboxDir: File,
@@ -1199,36 +1201,175 @@ class Downloader(
         val outFile = File(sandboxDir, "$filename.mkv")
         outFile.delete()
 
+        val httpClient = (download.source as? HttpSource)?.client ?: client
         val headers = video.headers ?: (download.source as? HttpSource)?.headers ?: Headers.headersOf()
-        val headerOptions = if (headers.size > 0) {
-            headers.joinToString("", "-headers '", "'") { "${it.first}: ${it.second}\r\n" }
+
+        suspend fun fetchBytes(url: String): ByteArray = withContext(Dispatchers.IO) {
+            val req = okhttp3.Request.Builder()
+                .url(url)
+                .headers(headers)
+                .build()
+            httpClient.newCall(req).execute().use { resp ->
+                if (!resp.isSuccessful) throw IOException("HTTP ${resp.code} al descargar $url")
+                resp.body.bytes()
+            }
+        }
+
+        fun resolveUrl(baseUrl: String, relativeOrFull: String): String {
+            if (relativeOrFull.startsWith("http://") || relativeOrFull.startsWith("https://")) {
+                return relativeOrFull
+            }
+            val baseUri = java.net.URI(baseUrl)
+            return baseUri.resolve(relativeOrFull).toString()
+        }
+
+        download.status = Download.State.DOWNLOADING
+        download.progress = 0
+        notifier.onProgressChange(download)
+
+        // 1. Si es HLS (.m3u8), descargamos el playlist, las llaves (.key) y los segmentos .ts con OkHttp
+        val localVideoInput: String = if (video.videoUrl.contains(".m3u8")) {
+            val hlsDir = File(sandboxDir, "${filename}_hls").apply {
+                deleteRecursively()
+                mkdirs()
+            }
+
+            // Resolver playlist maestro si apunta a otra variante .m3u8
+            var playlistUrl = video.videoUrl
+            var playlistText = String(fetchBytes(playlistUrl), Charsets.UTF_8)
+            if (playlistText.contains("#EXT-X-STREAM-INF")) {
+                val subLine = playlistText.lines().firstOrNull { line ->
+                    val t = line.trim()
+                    t.isNotEmpty() && !t.startsWith("#")
+                }
+                if (subLine != null) {
+                    playlistUrl = resolveUrl(playlistUrl, subLine.trim())
+                    playlistText = String(fetchBytes(playlistUrl), Charsets.UTF_8)
+                }
+            }
+
+            val keyCache = mutableMapOf<String, String>()
+            val segmentUrls = mutableListOf<Pair<Int, String>>()
+            val rewrittenLines = mutableListOf<String>()
+            var segIndex = 0
+
+            for (rawLine in playlistText.lines()) {
+                val line = rawLine.trim()
+                if (line.startsWith("#EXT-X-KEY") && line.contains("URI=\"")) {
+                    val uriMatch = Regex("""URI="([^"]+)"""").find(line)
+                    if (uriMatch != null) {
+                        val origKeyUri = uriMatch.groupValues[1]
+                        val fullKeyUrl = resolveUrl(playlistUrl, origKeyUri)
+                        val localKeyPath = keyCache.getOrPut(fullKeyUrl) {
+                            val keyFile = File(hlsDir, "key_${keyCache.size}.key")
+                            keyFile.writeBytes(fetchBytes(fullKeyUrl))
+                            keyFile.absolutePath
+                        }
+                        rewrittenLines.add(line.replace("""URI="$origKeyUri"""", """URI="$localKeyPath""""))
+                    } else {
+                        rewrittenLines.add(rawLine)
+                    }
+                } else if (line.isNotEmpty() && !line.startsWith("#")) {
+                    val fullSegUrl = resolveUrl(playlistUrl, line)
+                    val segName = "seg_%05d.ts".format(segIndex)
+                    segmentUrls.add(segIndex to fullSegUrl)
+                    rewrittenLines.add(File(hlsDir, segName).absolutePath)
+                    segIndex++
+                } else {
+                    rewrittenLines.add(rawLine)
+                }
+            }
+
+            val localM3u8 = File(hlsDir, "local_playlist.m3u8")
+            localM3u8.writeText(rewrittenLines.joinToString("\n"), Charsets.UTF_8)
+
+            // Descargar segmentos en paralelo (4 hilos) usando OkHttp
+            val totalSegs = segmentUrls.size.coerceAtLeast(1)
+            var downloadedCount = 0
+            var downloadedBytes = 0L
+            val lock = Any()
+
+            coroutineScope {
+                val dispatcher = Dispatchers.IO.limitedParallelism(4)
+                segmentUrls.map { (idx, segUrl) ->
+                    async(dispatcher) {
+                        val bytes = fetchBytes(segUrl)
+                        File(hlsDir, "seg_%05d.ts".format(idx)).writeBytes(bytes)
+                        synchronized(lock) {
+                            downloadedCount++
+                            downloadedBytes += bytes.size
+                            download.progress = ((downloadedCount * 95) / totalSegs).coerceIn(0, 95)
+                            download.update(downloadedBytes, -1L, false)
+                            notifier.onProgressChange(download)
+                        }
+                    }
+                }.awaitAll()
+            }
+
+            localM3u8.absolutePath
         } else {
-            ""
+            // Video directo (.mp4 / .mkv): descargar con OkHttp
+            val directFile = File(sandboxDir, "${filename}_direct.tmp")
+            val req = okhttp3.Request.Builder().url(video.videoUrl).headers(headers).build()
+            withContext(Dispatchers.IO) {
+                httpClient.newCall(req).execute().use { resp ->
+                    if (!resp.isSuccessful) throw IOException("HTTP ${resp.code} al descargar video directo")
+                    val total = resp.body.contentLength()
+                    var readTotal = 0L
+                    resp.body.byteStream().use { input ->
+                        directFile.outputStream().use { output ->
+                            val buf = ByteArray(64 * 1024)
+                            while (true) {
+                                val r = input.read(buf)
+                                if (r == -1) break
+                                output.write(buf, 0, r)
+                                readTotal += r
+                                if (total > 0) {
+                                    download.progress = ((readTotal * 95) / total).toInt().coerceIn(0, 95)
+                                }
+                                download.update(readTotal, total, false)
+                                notifier.onProgressChange(download)
+                            }
+                        }
+                    }
+                }
+            }
+            directFile.absolutePath
         }
 
+        // 2. Descargar subtítulos externos a archivos locales con OkHttp
         val validSubtitles = video.subtitleTracks.filter { it.url.isNotBlank() }
-        val subtitleInputs = validSubtitles.joinToString(" ", postfix = " ") { track ->
-            buildList {
-                if (track.url.startsWith("https")) add("-tls_verify 0")
-                if (track.url.startsWith("http") && headerOptions.isNotEmpty()) add(headerOptions)
-                add("-i")
-                add("\"${track.url}\"")
-            }.joinToString(" ")
+        val localSubFiles = validSubtitles.mapIndexedNotNull { idx, track ->
+            try {
+                val subFile = File(sandboxDir, "${filename}_sub_$idx.vtt")
+                if (track.url.startsWith("http")) {
+                    subFile.writeBytes(fetchBytes(track.url))
+                } else if (track.url.startsWith("data:")) {
+                    val base64Part = track.url.substringAfter("base64,", "")
+                    if (base64Part.isNotEmpty()) {
+                        subFile.writeBytes(android.util.Base64.decode(base64Part, android.util.Base64.DEFAULT))
+                    } else {
+                        subFile.writeText(java.net.URLDecoder.decode(track.url.substringAfter(","), "UTF-8"))
+                    }
+                } else {
+                    File(track.url.removePrefix("file://")).copyTo(subFile, overwrite = true)
+                }
+                track.lang to subFile
+            } catch (_: Exception) {
+                null
+            }
         }
-        val subtitleMaps = validSubtitles.indices.joinToString(" ") { "-map ${it + 1}:s" }
-        val subtitleMetadata = validSubtitles.mapIndexed { i, track ->
-            "-metadata:s:s:$i \"title=${track.lang}\""
-        }.joinToString(" ")
 
-        val videoInput = buildList {
-            if (video.videoUrl.startsWith("https")) add("-tls_verify 0")
-            if (video.videoUrl.startsWith("http") && headerOptions.isNotEmpty()) add(headerOptions)
-            add("-i")
-            add("\"${video.videoUrl}\"")
+        // 3. Unir video local + subtítulos locales en un .mkv final con FFmpeg (100% offline, cero SSL)
+        val subtitleInputs = localSubFiles.joinToString(" ", postfix = " ") { (_, f) -> "-i \"${f.absolutePath}\"" }
+        val subtitleMaps = localSubFiles.indices.joinToString(" ") { "-map ${it + 1}:s" }
+        val subtitleMetadata = localSubFiles.mapIndexed { i, (lang, _) ->
+            "-metadata:s:s:$i \"title=$lang\""
         }.joinToString(" ")
 
         val command = listOf(
-            videoInput,
+            "-allowed_extensions ALL -protocol_whitelist file,crypto",
+            "-i \"$localVideoInput\"",
             subtitleInputs,
             "-map 0:v -map 0:a?",
             subtitleMaps,
@@ -1240,20 +1381,26 @@ class Downloader(
 
         val args = com.arthenica.ffmpegkit.FFmpegKitConfig.parseArguments(command)
 
-        download.status = Download.State.DOWNLOADING
-        download.progress = 0
-        notifier.onProgressChange(download)
         return suspendCancellableCoroutine { continuation ->
             val session = com.arthenica.ffmpegkit.FFmpegKit.executeWithArgumentsAsync(
                 args,
                 { completedSession ->
+                    File(sandboxDir, "${filename}_hls").deleteRecursively()
+                    File(sandboxDir, "${filename}_direct.tmp").delete()
+                    localSubFiles.forEach { (_, f) -> f.delete() }
+
                     if (com.arthenica.ffmpegkit.ReturnCode.isSuccess(completedSession.getReturnCode()) && outFile.exists() && outFile.length() > 0L) {
                         download.progress = 100
                         continuation.resume(UniFile.fromFile(outFile)!!)
                     } else {
                         outFile.delete()
+                        val errorTail = completedSession.getAllLogsAsString()
+                            .lines()
+                            .filter { it.isNotBlank() }
+                            .takeLast(8)
+                            .joinToString("\n")
                         continuation.resumeWithException(
-                            IOException("Anikku FFmpeg fallback failed: ${completedSession.getAllLogsAsString()}"),
+                            IOException("Anikku FFmpeg fallback failed:\n$errorTail"),
                         )
                     }
                 },
@@ -1262,19 +1409,17 @@ class Downloader(
                         logcat(LogPriority.WARN) { "FFmpeg fallback: ${log.message}" }
                     }
                 },
-                { stats ->
-                    val outTimeMs = stats.time.toLong()
-                    if (outTimeMs > 0) {
-                        download.update(outFile.length(), -1L, false)
-                        notifier.onProgressChange(download)
-                    }
-                },
+                null,
             )
             continuation.invokeOnCancellation {
                 session.cancel()
+                File(sandboxDir, "${filename}_hls").deleteRecursively()
+                File(sandboxDir, "${filename}_direct.tmp").delete()
+                localSubFiles.forEach { (_, f) -> f.delete() }
             }
         }
     }
+
 
 
      private suspend fun nativeHlsDownload(
