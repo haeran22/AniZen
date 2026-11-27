@@ -112,7 +112,7 @@ class LibraryUpdateNotifier(
         )
     }
 
-    fun showQueueSizeWarningNotification() {
+        fun showQueueSizeWarningNotification() {
         context.notify(
             Notifications.ID_LIBRARY_SIZE_WARNING,
             Notifications.CHANNEL_LIBRARY_PROGRESS,
@@ -124,10 +124,11 @@ class LibraryUpdateNotifier(
                 ),
             )
             setSmallIcon(R.drawable.ic_warning_white_24dp)
-            setTimeoutAfter(Downloader.WARNING_NOTIF_TIMEOUT_MS)
+            setTimeoutAfter(30_000L)
             setContentIntent(NotificationHandler.openUrl(context, HELP_WARNING_URL))
         }
     }
+
 
     /**
      * Warn when excessively checking any single source.
