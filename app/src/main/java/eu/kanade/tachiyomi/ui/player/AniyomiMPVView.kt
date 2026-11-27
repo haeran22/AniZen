@@ -95,14 +95,14 @@ class AniyomiMPVView(context: Context, attributes: AttributeSet?) : BaseMPVView(
         setVo(if (decoderPreferences.gpuNext().get()) "gpu-next" else "gpu")
         mpv?.setPropertyBoolean("pause", true)
         setSafeOptionString("profile", "fast")
-        val isSmoothMotion = decoderPreferences.smoothMotion().get()
+                val isSmoothMotion = decoderPreferences.smoothMotion().get()
         val defaultHwdec = if (decoderPreferences.tryHWDecoding().get()) {
-            val fpsLimit = decoderPreferences.interpolationFPSLimit().get()
-            if (isSmoothMotion && fpsLimit > 0) "mediacodec-copy" else "mediacodec" // ANZ
+            "mediacodec-copy"
         } else {
             "no"
         }
         mpv?.setOptionString("hwdec", defaultHwdec)
+
 
         val isHighQuality = decoderPreferences.highQualityScaling().get()
         val scaler = if (isHighQuality) "spline36" else "bilinear"
@@ -193,12 +193,10 @@ class AniyomiMPVView(context: Context, attributes: AttributeSet?) : BaseMPVView(
         }
         // ANZ <--
 
-        // ANZ -->
+          // ANZ -->
         if (decoderPreferences.smoothMotion().get()) {
-            val fpsLimit = decoderPreferences.interpolationFPSLimit().get()
             if (decoderPreferences.tryHWDecoding().get()) {
-                val hwdecMode = if (fpsLimit > 0) "mediacodec-copy" else "mediacodec"
-                mpv?.setPropertyString("hwdec", hwdecMode)
+                mpv?.setPropertyString("hwdec", "mediacodec-copy")
             }
             mpv?.setPropertyString("interpolation-threshold", "-1")
             mpv?.setPropertyString("gpu-dumb-mode", "no")
@@ -206,6 +204,7 @@ class AniyomiMPVView(context: Context, attributes: AttributeSet?) : BaseMPVView(
             mpv?.setPropertyString("vf", vfChain)
         }
         // ANZ <--
+
     }
 
     fun onKey(event: KeyEvent): Boolean {
