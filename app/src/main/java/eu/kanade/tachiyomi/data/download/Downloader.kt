@@ -639,13 +639,14 @@ class Downloader(
                     null
                 }
 
-                finalizeDownload(
-                    download = download,
-                    videoFile = remuxed?.file ?: videoFile,
-                    publicDir = animeDir,
-                    filename = episodeDirname,
-                    overrideExt = remuxed?.extension,
-                )
+             finalizeDownload(
+                 download = download,
+                 videoFile = remuxed?.file ?: videoFile,
+                 publicDir = destDir,
+                 filename = episodeDirname,
+                 overrideExt = remuxed?.extension,
+             )
+
                 // ANZ <--
             } finally {
                 downloadHttpServer?.stop()
@@ -949,7 +950,9 @@ class Downloader(
         // Rename temporary episode folder (Episode_tmp -> Episode)
         val animeDir = provider.getAnimeDir(download.anime.ogTitle, download.source)
         animeDir.findFile(filename)?.delete()
-        publicDir.renameTo(filename)
+        if (!publicDir.renameTo(filename)) {
+            logcat(LogPriority.WARN) { "Could not rename temp directory ${publicDir.name} to $filename" }
+        }
 
         if (isLocalFile(videoFile)) {
             getLocalFile(videoFile)?.parentFile?.deleteRecursively()
@@ -963,6 +966,7 @@ class Downloader(
         notifier.dismissProgress(download)
 
         cache.addEpisode(filename, animeDir, download.anime)
+
     }
 
 
