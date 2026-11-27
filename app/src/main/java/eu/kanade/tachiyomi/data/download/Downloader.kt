@@ -1190,8 +1190,7 @@ class Downloader(
             }
             return UniFile.fromFile(finalFile)!!
         }
-    }
-        private suspend fun anikkuFallbackDownload(
+    }    private suspend fun anikkuFallbackDownload(
         download: Download,
         video: Video,
         sandboxDir: File,
@@ -1210,6 +1209,7 @@ class Downloader(
         val validSubtitles = video.subtitleTracks.filter { it.url.isNotBlank() }
         val subtitleInputs = validSubtitles.joinToString(" ", postfix = " ") { track ->
             buildList {
+                if (track.url.startsWith("https")) add("-tls_verify 0")
                 if (track.url.startsWith("http") && headerOptions.isNotEmpty()) add(headerOptions)
                 add("-i")
                 add("\"${track.url}\"")
@@ -1221,6 +1221,7 @@ class Downloader(
         }.joinToString(" ")
 
         val videoInput = buildList {
+            if (video.videoUrl.startsWith("https")) add("-tls_verify 0")
             if (video.videoUrl.startsWith("http") && headerOptions.isNotEmpty()) add(headerOptions)
             add("-i")
             add("\"${video.videoUrl}\"")
@@ -1237,7 +1238,7 @@ class Downloader(
             "\"${outFile.absolutePath}\" -y",
         ).filter(String::isNotBlank).joinToString(" ")
 
-    val args = com.arthenica.ffmpegkit.FFmpegKitConfig.parseArguments(command)
+        val args = com.arthenica.ffmpegkit.FFmpegKitConfig.parseArguments(command)
 
         download.status = Download.State.DOWNLOADING
         download.progress = 0
@@ -1274,6 +1275,7 @@ class Downloader(
             }
         }
     }
+
 
      private suspend fun nativeHlsDownload(
         download: Download,
@@ -1701,9 +1703,9 @@ class Downloader(
             }
         }
 
-        val host = Uri.parse(video.videoUrl).host ?: ""
+               val host = Uri.parse(video.videoUrl).host ?: ""
         val dashThreads = calculateDynamicConcurrency(host).coerceIn(3, 16)
-        val ffmpegOptions = getFFmpegOptions(video, headerString, ffmpegFilename, dashThreads)
+        val ffmpegOptions = arrayOf("-tls_verify", "0") + getFFmpegOptions(video, headerString, ffmpegFilename, dashThreads)
 
         // Initial UI State
         download.status = Download.State.DOWNLOADING
