@@ -1411,9 +1411,34 @@ class PlayerActivity : BaseActivity() {
     }
 
     private fun parseVideoUrl(videoUrl: String?): String? {
-        return videoUrl?.toUri()?.resolveUri(this)
-            ?: videoUrl
+        if (videoUrl == null) return null
+        val uri = videoUrl.toUri()
+
+        if (uri.scheme == "content") {
+            val realPath = UniFile.fromUri(this, uri)?.filePath
+            if (realPath != null && java.io.File(realPath).exists()) {
+                return realPath
+            }
+            val resolved = uri.resolveUri(this)
+            if (resolved != null) return resolved
+
+            return try {
+                val pfd = contentResolver.openFileDescriptor(uri, "r")
+                if (pfd != null) {
+                    "fd://${pfd.detachFd()}"
+                } else {
+                    logcat(LogPriority.ERROR) { "openFileDescriptor returned null for $videoUrl" }
+                    null
+                }
+            } catch (e: Exception) {
+                logcat(LogPriority.ERROR, e) { "Failed to open content URI for mpv: $videoUrl" }
+                null
+            }
+        }
+
+        return uri.resolveUri(this) ?: videoUrl
     }
+
 
     private fun setHttpOptions(video: Video) {
         if (viewModel.isEpisodeOnline() != true) return
