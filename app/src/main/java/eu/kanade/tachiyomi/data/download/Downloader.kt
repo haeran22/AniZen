@@ -1363,8 +1363,6 @@ class Downloader(
             }
         }
 
-              val discoveredMasterAudios = mutableListOf<Pair<String, String>>()
-
         download.status = Download.State.DOWNLOADING
         download.progress = 0
         notifier.onProgressChange(download)
