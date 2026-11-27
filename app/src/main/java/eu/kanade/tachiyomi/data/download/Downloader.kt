@@ -1191,112 +1191,91 @@ class Downloader(
             return UniFile.fromFile(finalFile)!!
         }
     }
-    private suspend fun anikkuFallbackDownload(
+        private suspend fun anikkuFallbackDownload(
         download: Download,
         video: Video,
         sandboxDir: File,
         filename: String,
     ): UniFile {
-        val sourceClient = (download.source as? HttpSource)?.client ?: networkHelper.client
-        val rawHeaders = video.headers ?: (download.source as? HttpSource)?.headers ?: Headers.headersOf()
-
-        // Re-attempt external subtitle tracks using the extension's own OkHttp client
-        if (video.subtitleTracks.isNotEmpty()) {
-            coroutineScope {
-                video.subtitleTracks.forEach { originalTrack ->
-                    launch {
-                        runCatching {
-                            val resolvedTracks = StremioSubtitleResolver.resolve(originalTrack, rawHeaders)
-                            resolvedTracks.forEach { track ->
-                                if (track.url.isBlank() || track.url.startsWith("file://")) return@forEach
-                                val cleanUrl = track.url.substringBefore("?")
-                                val subExt = when {
-                                    cleanUrl.endsWith(".vtt", ignoreCase = true) -> "vtt"
-                                    cleanUrl.endsWith(".ass", ignoreCase = true) -> "ass"
-                                    else -> "srt"
-                                }
-                                val subFile = File(sandboxDir, "$filename.${track.lang}.$subExt")
-                                if (!subFile.exists() || subFile.length() == 0L) {
-                                    val req = Request.Builder().url(track.url).headers(rawHeaders).build()
-                                    sourceClient.newCall(req).execute().use { res ->
-                                        if (res.isSuccessful) {
-                                            res.body?.byteStream()?.use { input ->
-                                                FileOutputStream(subFile).use { output ->
-                                                    input.copyTo(output)
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        // If the stream is an HLS playlist (.m3u8), download segments using the extension's client
-        if (download.engineType == "HLS" || video.videoUrl.contains("m3u8", ignoreCase = true)) {
-            return nativeHlsDownload(download, sandboxDir, filename, customClient = sourceClient)
-        }
-
-        // Direct single-stream download via extension client (Anikku style)
-        val outFile = File(sandboxDir, "$filename.tmp")
+        val outFile = File(sandboxDir, "$filename.mkv")
         outFile.delete()
-        download.partProgress.clear()
-        download.activeThreads = 1
 
-        val request = Request.Builder()
-            .url(video.videoUrl)
-            .headers(rawHeaders)
-            .build()
-
-        sourceClient.newCall(request).execute().use { response ->
-            if (!response.isSuccessful) {
-                throw IOException("Anikku fallback HTTP error: ${response.code}")
-            }
-            val body = response.body ?: throw IOException("Anikku fallback empty body")
-            val contentLength = body.contentLength()
-            if (contentLength > 0) {
-                checkFreeSpace(sandboxDir, contentLength)
-                download.totalSize = contentLength
-            }
-
-            body.byteStream().use { input ->
-                FileOutputStream(outFile).use { output ->
-                    val buffer = BufferPool.obtain()
-                    try {
-                        var read: Int
-                        var totalRead = 0L
-                        var lastUpdate = System.currentTimeMillis()
-                        while (input.read(buffer).also { read = it } != -1) {
-                            coroutineContext.ensureActive()
-                            if (download.status == Download.State.PAUSED) throw CancellationException()
-
-                            output.write(buffer, 0, read)
-                            totalRead += read
-
-                            if (contentLength > 0) {
-                                download.partProgress[0] = (totalRead.toFloat() / contentLength).coerceIn(0f, 1f)
-                            }
-
-                            val now = System.currentTimeMillis()
-                            if (now - lastUpdate > 500L) {
-                                download.update(totalRead, contentLength, false)
-                                notifier.onProgressChange(download)
-                                store.update(download)
-                                lastUpdate = now
-                            }
-                        }
-                    } finally {
-                        BufferPool.recycle(buffer)
-                    }
-                }
-            }
+        val headers = video.headers ?: (download.source as? HttpSource)?.headers ?: Headers.headersOf()
+        val headerOptions = if (headers.size > 0) {
+            headers.joinToString("", "-headers '", "'") { "${it.first}: ${it.second}\r\n" }
+        } else {
+            ""
         }
 
-        return UniFile.fromFile(outFile)!!
+        val validSubtitles = video.subtitleTracks.filter { it.url.isNotBlank() }
+        val subtitleInputs = validSubtitles.joinToString(" ", postfix = " ") { track ->
+            buildList {
+                if (track.url.startsWith("http") && headerOptions.isNotEmpty()) add(headerOptions)
+                add("-i")
+                add("\"${track.url}\"")
+            }.joinToString(" ")
+        }
+        val subtitleMaps = validSubtitles.indices.joinToString(" ") { "-map ${it + 1}:s" }
+        val subtitleMetadata = validSubtitles.mapIndexed { i, track ->
+            "-metadata:s:s:$i \"title=${track.lang}\""
+        }.joinToString(" ")
+
+        val videoInput = buildList {
+            if (video.videoUrl.startsWith("http") && headerOptions.isNotEmpty()) add(headerOptions)
+            add("-i")
+            add("\"${video.videoUrl}\"")
+        }.joinToString(" ")
+
+        val command = listOf(
+            videoInput,
+            subtitleInputs,
+            "-map 0:v -map 0:a?",
+            subtitleMaps,
+            "-map 0:s? -map 0:t?",
+            "-f matroska -c:a copy -c:v copy -c:s copy",
+            subtitleMetadata,
+            "\"${outFile.absolutePath}\" -y",
+        ).filter(String::isNotBlank).joinToString(" ")
+
+        val args = com.arthenica.ffmpegkit.FFmpegKitConfig.parseArguments(command)
+
+        download.status = Download.State.DOWNLOADING
+        download.progress = 0
+        notifier.onProgressChange(download)
+
+        return suspendCancellableCoroutine { continuation ->
+            val session = com.arthenica.ffmpegkit.FFmpegKit.executeWithArgumentsAsync(
+                args,
+                { completedSession ->
+                    if (completedSession.returnCode.isValueSuccess && outFile.exists() && outFile.length() > 0L) {
+                        download.progress = 100
+                        continuation.resume(UniFile.fromFile(outFile)!!)
+                    } else {
+                        outFile.delete()
+                        continuation.resumeWithException(
+                            IOException("Anikku FFmpeg fallback failed: ${completedSession.failStackTrace ?: completedSession.output}"),
+                        )
+                    }
+                },
+                { log ->
+                    if (log.level <= com.arthenica.ffmpegkit.Level.AV_LOG_WARNING) {
+                        logcat(LogPriority.WARN) { "FFmpeg fallback: ${log.message}" }
+                    }
+                },
+                { stats ->
+                    val outTimeMs = stats.time.toLong()
+                    if (outTimeMs > 0) {
+                        download.update(outFile.length(), -1L, false)
+                        notifier.onProgressChange(download)
+                    }
+                },
+            )
+            continuation.invokeOnCancellation {
+                session.cancel()
+            }
+        }
     }
+
 
 
      private suspend fun nativeHlsDownload(
