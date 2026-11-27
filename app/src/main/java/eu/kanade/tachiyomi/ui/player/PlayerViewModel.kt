@@ -2400,19 +2400,7 @@ viewModelScope.launchIO {
             val wasFirstSecond = currentEp.last_second_seen == 0L
             currentEp.last_second_seen = seconds
 
-            val progress = playerPreferences.progressPreference().get()
-            if (!currentEp.seen && seconds >= totalSeconds * progress) {
-                updateEpisodeProgressOnComplete(currentEp)
-                saveWatchingProgress(currentEp)
-
-                // SY -->
-                if (isSyncEnabled && syncTriggerOpt.syncOnEpisodeSeen) {
-                    SyncDataJob.startNow(Injekt.get<Application>())
-                }
-                // SY <--
-            } else if (position % 10L == 0L) {
-                saveWatchingProgress(currentEp)
-            }
+            
 
             // SY -->
             if (isSyncEnabled && syncTriggerOpt.syncOnEpisodeOpen && wasFirstSecond) {
