@@ -1237,7 +1237,7 @@ class Downloader(
             "\"${outFile.absolutePath}\" -y",
         ).filter(String::isNotBlank).joinToString(" ")
 
-                      val args = com.arthenica.ffmpegkit.FFmpegKitConfig.parseArguments(command)
+    val args = com.arthenica.ffmpegkit.FFmpegKitConfig.parseArguments(command)
 
         download.status = Download.State.DOWNLOADING
         download.progress = 0
@@ -1246,7 +1246,7 @@ class Downloader(
             val session = com.arthenica.ffmpegkit.FFmpegKit.executeWithArgumentsAsync(
                 args,
                 { completedSession ->
-                    if (completedSession.returnCode?.isValueSuccess() == true && outFile.exists() && outFile.length() > 0L) {
+                    if (com.arthenica.ffmpegkit.ReturnCode.isSuccess(completedSession.getReturnCode()) && outFile.exists() && outFile.length() > 0L) {
                         download.progress = 100
                         continuation.resume(UniFile.fromFile(outFile)!!)
                     } else {
@@ -1274,10 +1274,6 @@ class Downloader(
             }
         }
     }
-
-
-
-
 
      private suspend fun nativeHlsDownload(
         download: Download,
