@@ -1224,25 +1224,39 @@ class Downloader(
             return baseUri.resolve(relativeOrFull).toString()
         }
 
-        val discoveredMasterAudios = mutableListOf<Pair<String, String>>()
+              val discoveredMasterAudios = mutableListOf<Pair<String, String>>()
+        val totalDownloadedBytes = java.util.concurrent.atomic.LongAdder()
+        val audioSegsTotal = java.util.concurrent.atomic.AtomicInteger(0)
+        val audioSegsDone = java.util.concurrent.atomic.AtomicInteger(0)
+        val lastProgressNotify = java.util.concurrent.atomic.AtomicLong(0L)
+
+        fun notifyThrottledProgress(newProgress: Int) {
+            val clamped = newProgress.coerceIn(download.progress, 96)
+            download.progress = clamped
+            download.update(totalDownloadedBytes.sum(), -1L, false)
+            val now = System.currentTimeMillis()
+            val prev = lastProgressNotify.get()
+            if (now - prev > 300L && lastProgressNotify.compareAndSet(prev, now)) {
+                notifier.onProgressChange(download)
+            }
+        }
 
         suspend fun downloadStreamToLocal(
             streamUrl: String,
             prefix: String,
-            reportProgress: Boolean,
+            isVideo: Boolean,
         ): String {
-
             if (streamUrl.contains(".m3u8")) {
                 val hlsDir = File(sandboxDir, "${filename}_${prefix}_hls").apply {
                     deleteRecursively()
                     mkdirs()
                 }
 
-                               var playlistUrl = streamUrl
+                var playlistUrl = streamUrl
                 var playlistText = String(fetchBytes(playlistUrl), Charsets.UTF_8)
-                               if (playlistText.contains("#EXT-X-STREAM-INF")) {
+                if (playlistText.contains("#EXT-X-STREAM-INF")) {
                     val lines = playlistText.lines()
-                    if (prefix == "video") {
+                    if (isVideo) {
                         lines
                             .filter { it.trim().startsWith("#EXT-X-MEDIA") && it.contains("TYPE=AUDIO") && it.contains("URI=\"") }
                             .forEach { mediaLine ->
@@ -1273,7 +1287,6 @@ class Downloader(
                         playlistText = String(fetchBytes(playlistUrl), Charsets.UTF_8)
                     }
                 }
-
 
                 val keyCache = mutableMapOf<String, String>()
                 val segmentUrls = mutableListOf<Pair<Int, String>>()
@@ -1311,26 +1324,26 @@ class Downloader(
                 localM3u8.writeText(rewrittenLines.joinToString("\n"), Charsets.UTF_8)
 
                 val totalSegs = segmentUrls.size.coerceAtLeast(1)
-                var downloadedCount = 0
-                var downloadedBytes = 0L
-                val lock = Any()
+                if (!isVideo) {
+                    audioSegsTotal.addAndGet(totalSegs)
+                }
+                val videoSegsDone = java.util.concurrent.atomic.AtomicInteger(0)
 
-                                coroutineScope {
+                coroutineScope {
                     val threads = preferences.downloadThreads().get().coerceIn(1, 64)
                     val dispatcher = Dispatchers.IO.limitedParallelism(threads)
                     segmentUrls.map { (idx, segUrl) ->
-
                         async(dispatcher) {
                             val bytes = fetchBytes(segUrl)
                             File(hlsDir, "seg_%05d.ts".format(idx)).writeBytes(bytes)
-                            if (reportProgress) {
-                                synchronized(lock) {
-                                    downloadedCount++
-                                    downloadedBytes += bytes.size
-                                    download.progress = ((downloadedCount * 85) / totalSegs).coerceIn(0, 85)
-                                    download.update(downloadedBytes, -1L, false)
-                                    notifier.onProgressChange(download)
-                                }
+                            totalDownloadedBytes.add(bytes.size.toLong())
+                            if (isVideo) {
+                                val done = videoSegsDone.incrementAndGet()
+                                notifyThrottledProgress((done * 80) / totalSegs)
+                            } else {
+                                val done = audioSegsDone.incrementAndGet()
+                                val total = audioSegsTotal.get().coerceAtLeast(1)
+                                notifyThrottledProgress(80 + ((done * 15) / total))
                             }
                         }
                     }.awaitAll()
@@ -1353,12 +1366,9 @@ class Downloader(
                                     if (r == -1) break
                                     output.write(buf, 0, r)
                                     readTotal += r
-                                    if (reportProgress) {
-                                        if (total > 0) {
-                                            download.progress = ((readTotal * 85) / total).toInt().coerceIn(0, 85)
-                                        }
-                                        download.update(readTotal, total, false)
-                                        notifier.onProgressChange(download)
+                                    totalDownloadedBytes.add(r.toLong())
+                                    if (isVideo && total > 0) {
+                                        notifyThrottledProgress(((readTotal * 80) / total).toInt())
                                     }
                                 }
                             }
@@ -1382,29 +1392,34 @@ class Downloader(
         notifier.onProgressChange(download)
 
         try {
-            // 1. Descargar video principal
-            val localVideoInput = downloadStreamToLocal(video.videoUrl, "video", reportProgress = true)
+            // 1. Descargar video principal (0% -> 80%)
+            val localVideoInput = downloadStreamToLocal(video.videoUrl, "video", isVideo = true)
+            download.progress = 80
+            notifier.onProgressChange(download)
 
-            // 2. Descargar pistas de audio separadas (de video.audioTracks o del manifiesto maestro)
+            // 2. Descargar pistas de audio separadas en paralelo (80% -> 95%)
             val audiosToFetch = if (video.audioTracks.any { it.url.isNotBlank() }) {
                 video.audioTracks.filter { it.url.isNotBlank() }.map { it.lang to it.url }
             } else {
                 discoveredMasterAudios
             }
-            val localAudioInputs = audiosToFetch.mapIndexedNotNull { idx, (lang, audioUrl) ->
-                try {
-                    val path = downloadStreamToLocal(audioUrl, "audio_$idx", reportProgress = false)
-                    lang to path
-                } catch (e: Exception) {
-                    logcat(LogPriority.WARN, e) { "Error descargando pista de audio $lang: ${e.message}" }
-                    null
-                }
+            val localAudioInputs = coroutineScope {
+                audiosToFetch.mapIndexed { idx, (lang, audioUrl) ->
+                    async(Dispatchers.IO) {
+                        try {
+                            val path = downloadStreamToLocal(audioUrl, "audio_$idx", isVideo = false)
+                            lang to path
+                        } catch (e: Exception) {
+                            logcat(LogPriority.WARN, e) { "Error descargando pista de audio $lang: ${e.message}" }
+                            null
+                        }
+                    }
+                }.awaitAll().filterNotNull()
             }
-            download.progress = 93
+            download.progress = 95
             notifier.onProgressChange(download)
 
-
-            // 3. Descargar subtítulos externos a archivos locales
+            // 3. Descargar subtítulos externos a archivos locales (95% -> 97%)
             val validSubtitles = video.subtitleTracks.filter { it.url.isNotBlank() }
             val localSubFiles = validSubtitles.mapIndexedNotNull { idx, track ->
                 try {
@@ -1426,7 +1441,7 @@ class Downloader(
                     null
                 }
             }
-            download.progress = 96
+            download.progress = 97
             notifier.onProgressChange(download)
 
                     // 4. Construir entradas y mapeos para FFmpeg (0 = video, 1..N = audios, N+1..M = subtítulos)
