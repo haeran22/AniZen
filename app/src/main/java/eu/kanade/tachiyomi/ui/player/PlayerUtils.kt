@@ -35,16 +35,22 @@ import kotlin.properties.ReadOnlyProperty
 import kotlin.reflect.KProperty
 
 internal fun Uri.openContentFd(context: Context): String? {
-    return context.contentResolver.openFileDescriptor(this, "r")?.detachFd()?.let { fd ->
-        val path = Utils.findRealPath(fd)
-        if (path != null && java.io.File(path).canRead()) {
-            ParcelFileDescriptor.adoptFd(fd).close()
-            path
-        } else {
-            "fd://$fd"
+    return try {
+        context.contentResolver.openFileDescriptor(this, "r")?.detachFd()?.let { fd ->
+            val path = Utils.findRealPath(fd)
+            if (path != null && (path.startsWith("/storage/") || path.startsWith("/sdcard/")) && java.io.File(path).canRead()) {
+                ParcelFileDescriptor.adoptFd(fd).close()
+                path
+            } else {
+                "fd://$fd"
+            }
         }
+    } catch (e: Exception) {
+        logcat(LogPriority.ERROR, e) { "Failed to open content fd for $this" }
+        null
     }
 }
+
 
 internal fun Uri.resolveUri(context: Context): String? {
     val filepath = when (scheme) {
