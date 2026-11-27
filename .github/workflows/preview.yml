@@ -21,10 +21,9 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
-      - name: Generate Personal Keystore
+      - name: Decode Personal Keystore
         run: |
-          rm -f app/anizen.jks
-          keytool -genkey -v -keystore app/anizen.jks -storepass anizen123 -alias anizen -keypass anizen123 -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=AniZen Personal,O=AniZen,C=US"
+          echo "${{ secrets.PERSONAL_KEYSTORE_BASE64 }}" | base64 --decode > app/anizen.jks
 
       - name: Build Release APK
         run: ./gradlew assembleRelease -Pinclude-telemetry=false --no-daemon
