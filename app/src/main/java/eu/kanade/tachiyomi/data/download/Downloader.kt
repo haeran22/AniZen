@@ -1975,10 +1975,13 @@ class Downloader(
         }
     }
 
-    companion object {
+       companion object {
         const val TMP_DIR_SUFFIX = "_tmp"
         const val WARNING_NOTIF_TIMEOUT_MS = 30_000L
+        const val EPISODES_PER_SOURCE_QUEUE_WARNING_THRESHOLD = 10
+        private const val DOWNLOADS_QUEUED_WARNING_THRESHOLD = 20
     }
+
 }
 
 private const val MIN_DISK_SPACE = 200L * 1024 * 1024
