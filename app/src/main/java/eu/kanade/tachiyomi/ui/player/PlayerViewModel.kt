@@ -1146,12 +1146,16 @@ class PlayerViewModel @JvmOverloads constructor(
     }
     // ANZ <--
 
+        private var lastAppliedBrightness = -1f
     fun changeBrightnessTo(
         brightness: Float,
     ) {
-        currentBrightness.update { _ -> brightness.coerceIn(-0.75f, 1f) }
-        viewModelScope.launch {
-            eventChannel.send(Event.SetBrightness(brightness.coerceIn(0f, 1f)))
+        val clamped = brightness.coerceIn(-0.75f, 1f)
+        currentBrightness.update { clamped }
+        val windowBrightness = brightness.coerceIn(0f, 1f)
+        if (kotlin.math.abs(windowBrightness - lastAppliedBrightness) >= 0.01f || windowBrightness == 0f || windowBrightness == 1f) {
+            lastAppliedBrightness = windowBrightness
+            eventChannel.trySend(Event.SetBrightness(windowBrightness))
         }
     }
 
@@ -1161,14 +1165,12 @@ class PlayerViewModel @JvmOverloads constructor(
 
     val maxVolume = audioManager.getMaxVolume()
     fun changeVolumeBy(change: Int) {
-        val mpvVolume = mpv.getPropertyInt("volume")
-        if ((volumeBoostCap ?: audioPreferences.volumeBoostCap().get()) > 0 && currentVolume.value == maxVolume) {
+        val mpvVolume = currentMPVVolume.value
+        val boostCap = volumeBoostCap ?: audioPreferences.volumeBoostCap().get()
+        if (boostCap > 0 && currentVolume.value == maxVolume) {
             if (mpvVolume == 100 && change < 0) changeVolumeTo(currentVolume.value + change)
-            val finalMPVVolume = (mpvVolume?.plus(change))?.coerceAtLeast(100)
-                // ANK -->
-                ?: (currentVolume.value + change)
-            // ANK <--
-            if (finalMPVVolume in 100..(volumeBoostCap ?: audioPreferences.volumeBoostCap().get()) + 100) {
+            val finalMPVVolume = (mpvVolume + change).coerceAtLeast(100)
+            if (finalMPVVolume in 100..(boostCap + 100)) {
                 changeMPVVolumeTo(finalMPVVolume)
                 return
             }
@@ -1178,16 +1180,23 @@ class PlayerViewModel @JvmOverloads constructor(
 
     fun changeVolumeTo(volume: Int) {
         val newVolume = volume.coerceIn(0..maxVolume)
-        audioManager.setVolume(newVolume)
+        if (newVolume == currentVolume.value) return
         currentVolume.update { newVolume }
+        viewModelScope.launchIO {
+            audioManager.setVolume(newVolume)
+        }
     }
 
     fun changeMPVVolumeTo(volume: Int) {
+        if (volume == currentMPVVolume.value) return
         currentMPVVolume.update { volume }
-        // ANZ -->
-        if (mpv.isInitialized) mpv.setPropertyInt("volume", volume)
-        // ANZ <--
+        if (mpv.isInitialized) {
+            viewModelScope.launchIO {
+                mpv.setPropertyInt("volume", volume)
+            }
+        }
     }
+
 
     // ANZ -->
     fun setVolume(percent: Float) {
@@ -2386,38 +2395,37 @@ viewModelScope.launchIO {
         }
         // ANZ <--
 
-        // ANK -->
+               // ANK -->
         if (!incognitoMode) {
-            // Save last second seen and mark as seen if needed
+            val wasFirstSecond = currentEp.last_second_seen == 0L
             currentEp.last_second_seen = seconds
 
             val progress = playerPreferences.progressPreference().get()
-            if (seconds >= totalSeconds * progress) {
+            if (!currentEp.seen && seconds >= totalSeconds * progress) {
                 updateEpisodeProgressOnComplete(currentEp)
+                saveWatchingProgress(currentEp)
 
                 // SY -->
-                // Check if syncing is enabled for episode seen:
                 if (isSyncEnabled && syncTriggerOpt.syncOnEpisodeSeen) {
                     SyncDataJob.startNow(Injekt.get<Application>())
                 }
                 // SY <--
+            } else if (position % 10L == 0L) {
+                saveWatchingProgress(currentEp)
             }
-            // ANK <--
-
-            saveWatchingProgress(currentEp)
 
             // SY -->
-            // Check if syncing is enabled for episode open:
-            if (isSyncEnabled && syncTriggerOpt.syncOnEpisodeOpen && currentEp.last_second_seen == 0L) {
+            if (isSyncEnabled && syncTriggerOpt.syncOnEpisodeOpen && wasFirstSecond) {
                 SyncDataJob.startNow(Injekt.get<Application>())
             }
             // SY <--
         }
 
         val inDownloadRange = seconds.toDouble() / totalSeconds > 0.35
-        if (inDownloadRange) {
+        if (inDownloadRange && position % 15L == 0L) {
             downloadNextEpisodes()
         }
+
     }
 
     private fun updateEpisodeProgressOnComplete(currentEp: Episode) {
