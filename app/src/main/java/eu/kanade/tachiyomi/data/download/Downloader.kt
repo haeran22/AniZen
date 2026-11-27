@@ -1235,6 +1235,11 @@ class Downloader(
             }
         }
 
+        // If the stream is an HLS playlist (.m3u8), download segments using the extension's client
+        if (download.engineType == "HLS" || video.videoUrl.contains("m3u8", ignoreCase = true)) {
+            return nativeHlsDownload(download, sandboxDir, filename, customClient = sourceClient)
+        }
+
         // Direct single-stream download via extension client (Anikku style)
         val outFile = File(sandboxDir, "$filename.tmp")
         outFile.delete()
@@ -1293,15 +1298,20 @@ class Downloader(
         return UniFile.fromFile(outFile)!!
     }
 
-    private suspend fun nativeHlsDownload(download: Download, sandboxDir: File, filename: String): UniFile {
-        val video = download.video!!
-        val client = networkHelper.downloadClient
-        val headers = getHeaders(video)
-         val fallbackHeaders = headers.newBuilder()
-         .removeAll("Referer")
-         .removeAll("Origin")
-         .build()
 
+     private suspend fun nativeHlsDownload(
+        download: Download,
+        sandboxDir: File,
+        filename: String,
+        customClient: okhttp3.OkHttpClient? = null,
+    ): UniFile {
+        val video = download.video!!
+        val client = customClient ?: networkHelper.downloadClient
+        val headers = getHeaders(video)
+        val fallbackHeaders = headers.newBuilder()
+            .removeAll("Referer")
+            .removeAll("Origin")
+            .build()
 
         var playlistUrl = video.videoUrl
         var lines: List<String>
