@@ -46,12 +46,10 @@ internal fun Uri.openContentFd(context: Context): String? {
             }
         }
     } catch (e: Exception) {
-        logcat(LogPriority.ERROR, e) { "Failed to open content fd for $this" }
+        logcat("PlayerUtils", LogPriority.ERROR) { "Failed to open content fd for $this: ${e.message}" }
         null
     }
 }
-
-
 
 internal fun Uri.resolveUri(context: Context): String? {
     val filepath = when (scheme) {
