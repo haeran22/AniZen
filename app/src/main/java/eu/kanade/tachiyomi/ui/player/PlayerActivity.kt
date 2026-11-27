@@ -660,13 +660,19 @@ class PlayerActivity : BaseActivity() {
         }
         // ANK <--
 
-        player.init(mpv)
+                player.init(mpv)
+
+        mpv.setOptionString("cache", "yes")
+        mpv.setOptionString("demuxer-max-bytes", "16MiB")
+        mpv.setOptionString("demuxer-max-back-bytes", "4MiB")
+        mpv.setOptionString("demuxer-readahead-secs", "10")
 
         val showBlackBars = if (subtitlePreferences.subtitleBlackBars().get()) "yes" else "no"
         mpv.setOptionString("sub-ass-force-margins", showBlackBars)
         mpv.setOptionString("sub-use-margins", showBlackBars)
         mpv.addLogObserver(playerObserver)
         mpv.addObserver(playerObserver)
+
     }
 
     private fun setupPlayerAudio() {
