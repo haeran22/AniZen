@@ -152,7 +152,7 @@ class LibraryUpdateNotifier(
                     .bigText(context.stringResource(MR.strings.notification_size_warning)),
             )
             setSmallIcon(R.drawable.ic_warning_white_24dp)
-            setTimeoutAfter(Downloader.WARNING_NOTIF_TIMEOUT_MS)
+            setTimeoutAfter(30_000L)
             setContentIntent(NotificationHandler.openUrl(context, HELP_WARNING_URL))
         }
     }
