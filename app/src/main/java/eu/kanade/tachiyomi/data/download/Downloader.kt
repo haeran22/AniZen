@@ -1202,8 +1202,8 @@ class Downloader(
         val outFile = File(sandboxDir, "$filename.mkv")
         outFile.delete()
 
-        val httpClient = (download.source as? HttpSource)?.client ?: okhttp3.OkHttpClient()
-        val headers = video.headers ?: (download.source as? HttpSource)?.headers ?: Headers.headersOf()
+        val httpClient = networkHelper.downloadClient
+        val headers = getHeaders(video)
 
         suspend fun fetchBytes(url: String): ByteArray = withContext(Dispatchers.IO) {
             val req = okhttp3.Request.Builder()
@@ -1240,9 +1240,10 @@ class Downloader(
 
                                var playlistUrl = streamUrl
                 var playlistText = String(fetchBytes(playlistUrl), Charsets.UTF_8)
-                if (playlistText.contains("#EXT-X-STREAM-INF")) {
+                               if (playlistText.contains("#EXT-X-STREAM-INF")) {
+                    val lines = playlistText.lines()
                     if (prefix == "video") {
-                        playlistText.lines()
+                        lines
                             .filter { it.trim().startsWith("#EXT-X-MEDIA") && it.contains("TYPE=AUDIO") && it.contains("URI=\"") }
                             .forEach { mediaLine ->
                                 val uri = Regex("""URI="([^"]+)"""").find(mediaLine)?.groupValues?.get(1)
@@ -1252,12 +1253,23 @@ class Downloader(
                                 }
                             }
                     }
-                    val subLine = playlistText.lines().firstOrNull { line ->
-                        val t = line.trim()
-                        t.isNotEmpty() && !t.startsWith("#")
+                    var bestBandwidth = -1L
+                    var bestSubLine: String? = null
+                    var lastBandwidth = 0L
+                    for (raw in lines) {
+                        val t = raw.trim()
+                        if (t.startsWith("#EXT-X-STREAM-INF")) {
+                            lastBandwidth = Regex("""BANDWIDTH=(\d+)""").find(t)?.groupValues?.get(1)?.toLongOrNull() ?: 0L
+                        } else if (t.isNotEmpty() && !t.startsWith("#")) {
+                            if (bestSubLine == null || lastBandwidth > bestBandwidth) {
+                                bestBandwidth = lastBandwidth
+                                bestSubLine = t
+                            }
+                            lastBandwidth = 0L
+                        }
                     }
-                    if (subLine != null) {
-                        playlistUrl = resolveUrl(playlistUrl, subLine.trim())
+                    if (bestSubLine != null) {
+                        playlistUrl = resolveUrl(playlistUrl, bestSubLine)
                         playlistText = String(fetchBytes(playlistUrl), Charsets.UTF_8)
                     }
                 }
@@ -1303,9 +1315,11 @@ class Downloader(
                 var downloadedBytes = 0L
                 val lock = Any()
 
-                coroutineScope {
-                    val dispatcher = Dispatchers.IO.limitedParallelism(4)
+                                coroutineScope {
+                    val threads = preferences.downloadThreads().get().coerceIn(1, 64)
+                    val dispatcher = Dispatchers.IO.limitedParallelism(threads)
                     segmentUrls.map { (idx, segUrl) ->
+
                         async(dispatcher) {
                             val bytes = fetchBytes(segUrl)
                             File(hlsDir, "seg_%05d.ts".format(idx)).writeBytes(bytes)
