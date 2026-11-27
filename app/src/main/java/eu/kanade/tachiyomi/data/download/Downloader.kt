@@ -1246,8 +1246,8 @@ class Downloader(
         return suspendCancellableCoroutine { continuation ->
             val session = com.arthenica.ffmpegkit.FFmpegKit.executeWithArgumentsAsync(
                 args,
-                { completedSession ->
-                    if (completedSession.returnCode.isValueSuccess && outFile.exists() && outFile.length() > 0L) {
+                 completedSession ->
+                    if (completedSession.returnCode.isValueSuccess() && outFile.exists() && outFile.length() > 0L) {
                         download.progress = 100
                         continuation.resume(UniFile.fromFile(outFile)!!)
                     } else {
@@ -1256,9 +1256,8 @@ class Downloader(
                             IOException("Anikku FFmpeg fallback failed: ${completedSession.getAllLogsAsString()}"),
                         )
                     }
-
-
                 },
+
                 { log ->
                     if (log.level <= com.arthenica.ffmpegkit.Level.AV_LOG_WARNING) {
                         logcat(LogPriority.WARN) { "FFmpeg fallback: ${log.message}" }
