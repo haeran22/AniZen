@@ -1250,12 +1250,13 @@ class Downloader(
                     if (completedSession.returnCode.isValueSuccess && outFile.exists() && outFile.length() > 0L) {
                         download.progress = 100
                         continuation.resume(UniFile.fromFile(outFile)!!)
-                                                           } else {
+                    } else {
                         outFile.delete()
                         continuation.resumeWithException(
-                            IOException("Anikku FFmpeg fallback failed: ${completedSession.failStackTrace ?: completedSession.getAllLogsAsString()}"),
+                            IOException("Anikku FFmpeg fallback failed: ${completedSession.getAllLogsAsString()}"),
                         )
                     }
+
 
                 },
                 { log ->
