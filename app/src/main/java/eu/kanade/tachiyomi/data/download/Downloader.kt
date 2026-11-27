@@ -1235,9 +1235,20 @@ class Downloader(
                     mkdirs()
                 }
 
-                var playlistUrl = streamUrl
+                               var playlistUrl = streamUrl
                 var playlistText = String(fetchBytes(playlistUrl), Charsets.UTF_8)
                 if (playlistText.contains("#EXT-X-STREAM-INF")) {
+                    if (prefix == "video") {
+                        playlistText.lines()
+                            .filter { it.trim().startsWith("#EXT-X-MEDIA") && it.contains("TYPE=AUDIO") && it.contains("URI=\"") }
+                            .forEach { mediaLine ->
+                                val uri = Regex("""URI="([^"]+)"""").find(mediaLine)?.groupValues?.get(1)
+                                val name = Regex("""NAME="([^"]+)"""").find(mediaLine)?.groupValues?.get(1) ?: "Audio"
+                                if (!uri.isNullOrBlank()) {
+                                    discoveredMasterAudios.add(name to resolveUrl(playlistUrl, uri))
+                                }
+                            }
+                    }
                     val subLine = playlistText.lines().firstOrNull { line ->
                         val t = line.trim()
                         t.isNotEmpty() && !t.startsWith("#")
@@ -1247,6 +1258,7 @@ class Downloader(
                         playlistText = String(fetchBytes(playlistUrl), Charsets.UTF_8)
                     }
                 }
+
 
                 val keyCache = mutableMapOf<String, String>()
                 val segmentUrls = mutableListOf<Pair<Int, String>>()
@@ -1348,6 +1360,8 @@ class Downloader(
             }
         }
 
+              val discoveredMasterAudios = mutableListOf<Pair<String, String>>()
+
         download.status = Download.State.DOWNLOADING
         download.progress = 0
         notifier.onProgressChange(download)
@@ -1356,18 +1370,24 @@ class Downloader(
             // 1. Descargar video principal
             val localVideoInput = downloadStreamToLocal(video.videoUrl, "video", reportProgress = true)
 
-            // 2. Descargar pistas de audio separadas (video.audioTracks)
-            val validAudios = video.audioTracks.filter { it.url.isNotBlank() }
-            val localAudioInputs = validAudios.mapIndexedNotNull { idx, track ->
+            // 2. Descargar pistas de audio separadas (de video.audioTracks o del manifiesto maestro)
+            val audiosToFetch = if (video.audioTracks.any { it.url.isNotBlank() }) {
+                video.audioTracks.filter { it.url.isNotBlank() }.map { it.lang to it.url }
+            } else {
+                discoveredMasterAudios
+            }
+            val localAudioInputs = audiosToFetch.mapIndexedNotNull { idx, (lang, audioUrl) ->
                 try {
-                    val path = downloadStreamToLocal(track.url, "audio_$idx", reportProgress = false)
-                    track.lang to path
-                } catch (_: Exception) {
+                    val path = downloadStreamToLocal(audioUrl, "audio_$idx", reportProgress = false)
+                    lang to path
+                } catch (e: Exception) {
+                    logcat(LogPriority.WARN, e) { "Error descargando pista de audio $lang: ${e.message}" }
                     null
                 }
             }
             download.progress = 93
             notifier.onProgressChange(download)
+
 
             // 3. Descargar subtítulos externos a archivos locales
             val validSubtitles = video.subtitleTracks.filter { it.url.isNotBlank() }
@@ -1394,7 +1414,7 @@ class Downloader(
             download.progress = 96
             notifier.onProgressChange(download)
 
-            // 4. Construir entradas y mapeos para FFmpeg (0 = video, 1..N = audios, N+1..M = subtítulos)
+                    // 4. Construir entradas y mapeos para FFmpeg (0 = video, 1..N = audios, N+1..M = subtítulos)
             val audioInputs = localAudioInputs.joinToString(" ") { (_, path) ->
                 "-allowed_extensions ALL -protocol_whitelist file,crypto -i \"$path\""
             }
@@ -1407,7 +1427,7 @@ class Downloader(
 
             val subOffset = 1 + localAudioInputs.size
             val subtitleInputs = localSubFiles.joinToString(" ") { (_, f) ->
-                "-i \"${f.absolutePath}\""
+                "-protocol_whitelist file,crypto -i \"${f.absolutePath}\""
             }
             val subtitleMaps = localSubFiles.indices.joinToString(" ") { i ->
                 "-map ${subOffset + i}:s"
@@ -1421,8 +1441,9 @@ class Downloader(
                 "-i \"$localVideoInput\"",
                 audioInputs,
                 subtitleInputs,
-                "-map 0:v -map 0:a?",
+                "-map 0:v",
                 audioMaps,
+                "-map 0:a?",
                 subtitleMaps,
                 "-map 0:s? -map 0:t?",
                 "-f matroska -c:a copy -c:v copy -c:s copy",
@@ -1430,6 +1451,7 @@ class Downloader(
                 subtitleMetadata,
                 "\"${outFile.absolutePath}\" -y",
             ).filter(String::isNotBlank).joinToString(" ")
+
 
             val args = com.arthenica.ffmpegkit.FFmpegKitConfig.parseArguments(command)
 
