@@ -1242,11 +1242,10 @@ class Downloader(
         download.status = Download.State.DOWNLOADING
         download.progress = 0
         notifier.onProgressChange(download)
-
         return suspendCancellableCoroutine { continuation ->
             val session = com.arthenica.ffmpegkit.FFmpegKit.executeWithArgumentsAsync(
                 args,
-                 completedSession ->
+                { completedSession ->
                     if (completedSession.returnCode.isValueSuccess() && outFile.exists() && outFile.length() > 0L) {
                         download.progress = 100
                         continuation.resume(UniFile.fromFile(outFile)!!)
@@ -1257,6 +1256,7 @@ class Downloader(
                         )
                     }
                 },
+
 
                 { log ->
                     if (log.level <= com.arthenica.ffmpegkit.Level.AV_LOG_WARNING) {
