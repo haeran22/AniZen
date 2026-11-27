@@ -1981,7 +1981,7 @@ class Downloader(
         const val EPISODES_PER_SOURCE_QUEUE_WARNING_THRESHOLD = 10
         private const val DOWNLOADS_QUEUED_WARNING_THRESHOLD = 20
     }
-}
+
 
 
 private const val MIN_DISK_SPACE = 200L * 1024 * 1024
