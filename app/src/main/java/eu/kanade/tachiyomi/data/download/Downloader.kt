@@ -532,7 +532,7 @@ class Downloader(
             // ANZ <--
             val mergedFile = File(sandboxDir, "$videoFilename.tmp")
 
-            // RECOVERY: Handle interrupted FINALIZING state
+                       // RECOVERY: Handle interrupted FINALIZING state
             if (previousState == Download.State.FINALIZING && mergedFile.exists()) {
                 val recoveredFile = UniFile.fromFile(mergedFile)
                     ?: throw IOException("Recovered merge file is no longer accessible: ${mergedFile.absolutePath}")
@@ -1250,12 +1250,13 @@ class Downloader(
                     if (completedSession.returnCode.isValueSuccess && outFile.exists() && outFile.length() > 0L) {
                         download.progress = 100
                         continuation.resume(UniFile.fromFile(outFile)!!)
-                    } else {
+                                        } else {
                         outFile.delete()
                         continuation.resumeWithException(
-                            IOException("Anikku FFmpeg fallback failed: ${completedSession.failStackTrace ?: completedSession.output}"),
+                            IOException("Anikku FFmpeg fallback failed: ${completedSession.failStackTrace ?: completedSession.allLogsAsString}"),
                         )
                     }
+
                 },
                 { log ->
                     if (log.level <= com.arthenica.ffmpegkit.Level.AV_LOG_WARNING) {
