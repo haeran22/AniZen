@@ -118,7 +118,7 @@ class DownloadProvider(
      * @param source the source of the episode.
      * @param episodeNumber the episode number to fallback to if the name was changed
      */
-    fun findEpisodeDir(
+        fun findEpisodeDir(
         episodeName: String,
         episodeScanlator: String?,
         animeTitle: String,
@@ -129,10 +129,6 @@ class DownloadProvider(
         if (source.isLocal()) {
             return animeDir?.listFiles().orEmpty().find { it.nameWithoutExtension == episodeName }
         }
-        val flatBaseName = getEpisodeFileBaseName(animeTitle, episodeName)
-        val flatFile = animeDir?.listFiles().orEmpty()
-            .firstOrNull { !it.isDirectory && it.nameWithoutExtension == flatBaseName && it.hasPlayableVideo() }
-        if (flatFile != null) return flatFile
 
         val exact = getValidEpisodeDirNames(episodeName, episodeScanlator).asSequence()
             .mapNotNull { animeDir?.findFile(it) }
@@ -150,13 +146,6 @@ class DownloadProvider(
         return null
     }
 
-    /**
-     * Returns a list of downloaded directories for the episodes that exist.
-     *
-     * @param episodes the episodes to query.
-     * @param anime the anime of the episode.
-     * @param source the source of the episode.
-     */
     fun findEpisodeDirs(episodes: List<Episode>, anime: Anime, source: Source): Pair<UniFile?, List<UniFile>> {
         val animeDir = findAnimeDir(if (source.isLocal()) anime.url else anime.ogTitle, source)
             ?: return null to emptyList()
@@ -165,20 +154,13 @@ class DownloadProvider(
 
         if (source.isLocal()) {
             return animeDir to episodes.mapNotNull { episode ->
-                // Try finding by URL filename first
                 val filenameFromUrl = episode.url.split('/', limit = 2).lastOrNull()
                 val fileByUrl = filenameFromUrl?.let { filesByName[it] }
-
-                // Fallback to finding by name without extension
                 fileByUrl ?: allFiles.find { it.nameWithoutExtension == episode.name }
             }
         }
 
         return animeDir to episodes.flatMap { episode ->
-            val flatBaseName = getEpisodeFileBaseName(anime.ogTitle, episode.name)
-            val flatMatches = allFiles.filter { !it.isDirectory && it.nameWithoutExtension?.startsWith(flatBaseName) == true }
-            if (flatMatches.isNotEmpty()) return@flatMap flatMatches
-
             val exact = getValidEpisodeDirNames(episode.name, episode.scanlator).firstNotNullOfOrNull { filesByName[it] }
             if (exact != null) return@flatMap listOf(exact)
 
@@ -194,6 +176,7 @@ class DownloadProvider(
             }
         }
     }
+
 
     /**
      * Returns the download directory name for a source.
