@@ -1224,11 +1224,14 @@ class Downloader(
             return baseUri.resolve(relativeOrFull).toString()
         }
 
+        val discoveredMasterAudios = mutableListOf<Pair<String, String>>()
+
         suspend fun downloadStreamToLocal(
             streamUrl: String,
             prefix: String,
             reportProgress: Boolean,
         ): String {
+
             if (streamUrl.contains(".m3u8")) {
                 val hlsDir = File(sandboxDir, "${filename}_${prefix}_hls").apply {
                     deleteRecursively()
