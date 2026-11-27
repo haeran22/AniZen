@@ -52,6 +52,7 @@ internal fun Uri.openContentFd(context: Context): String? {
 }
 
 
+
 internal fun Uri.resolveUri(context: Context): String? {
     val filepath = when (scheme) {
         "file" -> path
