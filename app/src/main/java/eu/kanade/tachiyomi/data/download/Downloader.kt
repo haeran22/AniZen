@@ -1202,7 +1202,7 @@ class Downloader(
         val outFile = File(sandboxDir, "$filename.mkv")
         outFile.delete()
 
-        val httpClient = networkHelper.downloadClient
+        val httpClient = (download.source as? HttpSource)?.client ?: networkHelper.downloadClient
         val headers = getHeaders(video)
 
         suspend fun fetchBytes(url: String): ByteArray = withContext(Dispatchers.IO) {
