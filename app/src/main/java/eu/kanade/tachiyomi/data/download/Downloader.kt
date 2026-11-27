@@ -606,11 +606,19 @@ class Downloader(
                     if (success) return else throw Exception("Could not open external downloader")
                 }
 
-                val videoFile = when (download.engineType) {
-                    "Torrent" -> torrentDownload(download, sandboxDir, videoFilename)
-                    "HLS" -> nativeHlsDownload(download, sandboxDir, videoFilename)
-                    "DASH" -> UniFile.fromFile(nativeDashMuxDownload(download, sandboxDir, videoFilename))!!
-                    else -> internalDownload(download, sandboxDir, videoFilename)
+                               val videoFile = try {
+                    when (download.engineType) {
+                        "Torrent" -> torrentDownload(download, sandboxDir, videoFilename)
+                        "HLS" -> nativeHlsDownload(download, sandboxDir, videoFilename)
+                        "DASH" -> UniFile.fromFile(nativeDashMuxDownload(download, sandboxDir, videoFilename))!!
+                        else -> internalDownload(download, sandboxDir, videoFilename)
+                    }
+                } catch (primaryError: Exception) {
+                    if (primaryError is CancellationException || download.engineType == "Torrent") {
+                        throw primaryError
+                    }
+                    logcat(LogPriority.WARN, primaryError) { "Primary engine (${download.engineType}) failed, trying Anikku direct fallback..." }
+                    anikkuFallbackDownload(download, effectiveVideo, sandboxDir, videoFilename)
                 }
 
                 if (videoFile.length() <= 0L) {
@@ -1178,6 +1186,107 @@ class Downloader(
             }
             return UniFile.fromFile(finalFile)!!
         }
+    }
+    private suspend fun anikkuFallbackDownload(
+        download: Download,
+        video: Video,
+        sandboxDir: File,
+        filename: String,
+    ): UniFile {
+        val sourceClient = (download.source as? HttpSource)?.client ?: networkHelper.client
+        val rawHeaders = video.headers ?: (download.source as? HttpSource)?.headers ?: Headers.headersOf()
+
+        // Re-attempt external subtitle tracks using the extension's own OkHttp client
+        if (video.subtitleTracks.isNotEmpty()) {
+            coroutineScope {
+                video.subtitleTracks.forEach { originalTrack ->
+                    launch {
+                        runCatching {
+                            val resolvedTracks = StremioSubtitleResolver.resolve(originalTrack, rawHeaders)
+                            resolvedTracks.forEach { track ->
+                                if (track.url.isBlank() || track.url.startsWith("file://")) return@forEach
+                                val cleanUrl = track.url.substringBefore("?")
+                                val subExt = when {
+                                    cleanUrl.endsWith(".vtt", ignoreCase = true) -> "vtt"
+                                    cleanUrl.endsWith(".ass", ignoreCase = true) -> "ass"
+                                    else -> "srt"
+                                }
+                                val subFile = File(sandboxDir, "$filename.${track.lang}.$subExt")
+                                if (!subFile.exists() || subFile.length() == 0L) {
+                                    val req = Request.Builder().url(track.url).headers(rawHeaders).build()
+                                    sourceClient.newCall(req).execute().use { res ->
+                                        if (res.isSuccessful) {
+                                            res.body?.byteStream()?.use { input ->
+                                                FileOutputStream(subFile).use { output ->
+                                                    input.copyTo(output)
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Direct single-stream download via extension client (Anikku style)
+        val outFile = File(sandboxDir, "$filename.tmp")
+        outFile.delete()
+        download.partProgress.clear()
+        download.activeThreads = 1
+
+        val request = Request.Builder()
+            .url(video.videoUrl)
+            .headers(rawHeaders)
+            .build()
+
+        sourceClient.newCall(request).execute().use { response ->
+            if (!response.isSuccessful) {
+                throw IOException("Anikku fallback HTTP error: ${response.code}")
+            }
+            val body = response.body ?: throw IOException("Anikku fallback empty body")
+            val contentLength = body.contentLength()
+            if (contentLength > 0) {
+                checkFreeSpace(sandboxDir, contentLength)
+                download.totalSize = contentLength
+            }
+
+            body.byteStream().use { input ->
+                FileOutputStream(outFile).use { output ->
+                    val buffer = BufferPool.obtain()
+                    try {
+                        var read: Int
+                        var totalRead = 0L
+                        var lastUpdate = System.currentTimeMillis()
+                        while (input.read(buffer).also { read = it } != -1) {
+                            coroutineContext.ensureActive()
+                            if (download.status == Download.State.PAUSED) throw CancellationException()
+
+                            output.write(buffer, 0, read)
+                            totalRead += read
+
+                            if (contentLength > 0) {
+                                download.partProgress[0] = (totalRead.toFloat() / contentLength).coerceIn(0f, 1f)
+                            }
+
+                            val now = System.currentTimeMillis()
+                            if (now - lastUpdate > 500L) {
+                                download.update(totalRead, contentLength, false)
+                                notifier.onProgressChange(download)
+                                store.update(download)
+                                lastUpdate = now
+                            }
+                        }
+                    } finally {
+                        BufferPool.recycle(buffer)
+                    }
+                }
+            }
+        }
+
+        return UniFile.fromFile(outFile)!!
     }
 
     private suspend fun nativeHlsDownload(download: Download, sandboxDir: File, filename: String): UniFile {
