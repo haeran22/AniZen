@@ -83,6 +83,7 @@ import tachiyomi.i18n.MR
 import tachiyomi.presentation.core.i18n.stringResource
 import tachiyomi.presentation.core.screens.LoadingScreen
 import tachiyomi.presentation.core.util.collectAsState
+import tachiyomi.source.localanime.isLocal
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
 import uy.kohesive.injekt.injectLazy
@@ -358,7 +359,6 @@ class AnimeScreen(
                     },
                 )
             }
-
             is AnimeScreenModel.Dialog.SetAnimeFetchInterval -> {
                 SetIntervalDialog(
                     interval = dialog.anime.fetchInterval,
@@ -424,17 +424,32 @@ class AnimeScreen(
                     anime = dialog.anime,
                     onDismissRequest = screenModel::dismissDialog,
                     onPositiveClick = { title, author, artist, thumbnailUrl, description, tags, status ->
-                        screenModel.updateAnimeInfo(
-                            title,
-                            author,
-                            artist,
-                            thumbnailUrl,
-                            description,
-                            tags,
-                            status,
-                            null,
-                            null,
-                        )
+                        scope.launchIO {
+                            runCatching {
+                                screenModel.updateAnimeInfo(
+                                    title,
+                                    author,
+                                    artist,
+                                    thumbnailUrl,
+                                    description,
+                                    tags,
+                                    status,
+                                    null,
+                                    null,
+                                )
+                            }
+                            if (dialog.anime.isLocal()) {
+                                LocalMetadataFetcher.saveDetailsJson(
+                                    anime = dialog.anime,
+                                    title = title,
+                                    author = author,
+                                    artist = artist,
+                                    description = description,
+                                    genres = tags,
+                                    status = status?.toInt() ?: dialog.anime.status.toInt(),
+                                )
+                            }
+                        }
                     },
                 )
             }
