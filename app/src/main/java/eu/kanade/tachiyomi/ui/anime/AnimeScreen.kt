@@ -1,731 +1,710 @@
 package eu.kanade.tachiyomi.ui.anime
 
-import android.graphics.Bitmap
-import android.graphics.BitmapFactory
-import android.graphics.Canvas
-import android.graphics.Paint
-import android.graphics.RectF
-import com.hippo.unifile.UniFile
-import eu.kanade.tachiyomi.network.NetworkHelper
-import eu.kanade.tachiyomi.source.model.SAnime
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
-import kotlinx.serialization.encodeToString
-import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.intOrNull
-import kotlinx.serialization.json.jsonArray
-import kotlinx.serialization.json.jsonObject
-import kotlinx.serialization.json.jsonPrimitive
-import kotlinx.serialization.json.put
-import kotlinx.serialization.json.putJsonArray
-import kotlinx.serialization.json.putJsonObject
-import okhttp3.HttpUrl.Companion.toHttpUrl
-import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.Request
-import okhttp3.RequestBody.Companion.toRequestBody
-import tachiyomi.core.metadata.tachiyomi.EpisodeDetails
+import android.content.Context
+import android.content.Intent
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.core.net.toUri
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import cafe.adriel.voyager.core.model.rememberScreenModel
+import cafe.adriel.voyager.navigator.LocalNavigator
+import cafe.adriel.voyager.navigator.Navigator
+import cafe.adriel.voyager.navigator.currentOrThrow
+import eu.kanade.core.util.ifSourcesLoaded
+import eu.kanade.domain.anime.model.hasCustomCover
+import eu.kanade.domain.connections.service.ConnectionsPreferences
+import eu.kanade.domain.ui.UiPreferences
+import eu.kanade.presentation.anime.AnimeScreen
+import eu.kanade.presentation.anime.DuplicateAnimeDialog
+import eu.kanade.presentation.anime.EditCoverAction
+import eu.kanade.presentation.anime.EpisodeOptionsDialogScreen
+import eu.kanade.presentation.anime.EpisodeSettingsDialog
+import eu.kanade.presentation.anime.components.AnimeCoverDialog
+import eu.kanade.presentation.anime.components.ClearAnimeDialog
+import eu.kanade.presentation.anime.components.DeleteEpisodesDialog
+import eu.kanade.presentation.anime.components.ScanlatorFilterDialog
+import eu.kanade.presentation.anime.components.SetIntervalDialog
+import eu.kanade.presentation.category.components.ChangeCategoryDialog
+import eu.kanade.presentation.components.NavigatorAdaptiveSheet
+import eu.kanade.presentation.more.settings.screen.player.PlayerSettingsGesturesScreen.SkipIntroLengthDialog
+import eu.kanade.presentation.util.AssistContentScreen
+import eu.kanade.presentation.util.Screen
+import eu.kanade.presentation.util.formatEpisodeNumber
+import eu.kanade.presentation.util.isTabletUi
+import eu.kanade.tachiyomi.animesource.ConfigurableAnimeSource
+import eu.kanade.tachiyomi.data.connections.discord.DiscordRPCService
+import eu.kanade.tachiyomi.data.torrentServer.service.TorrentServerService
+import eu.kanade.tachiyomi.source.Source
+import eu.kanade.tachiyomi.source.isLocalOrStub
+import eu.kanade.tachiyomi.source.isSourceForTorrents
+import eu.kanade.tachiyomi.source.online.HttpSource
+import eu.kanade.tachiyomi.torrentServer.TorrentServerUtils
+import eu.kanade.tachiyomi.ui.anime.AnimeCoverScreenModel
+import eu.kanade.tachiyomi.ui.anime.merged.EditMergedSettingsDialog
+import eu.kanade.tachiyomi.ui.anime.notes.AnimeNotesScreen
+import eu.kanade.tachiyomi.ui.anime.track.TrackInfoDialogHomeScreen
+import eu.kanade.tachiyomi.ui.browse.extension.details.SourcePreferencesScreen
+import eu.kanade.tachiyomi.ui.browse.migration.search.MigrateDialog
+import eu.kanade.tachiyomi.ui.browse.migration.search.MigrateDialogScreenModel
+import eu.kanade.tachiyomi.ui.browse.source.browse.BrowseSourceScreen
+import eu.kanade.tachiyomi.ui.browse.source.globalsearch.GlobalSearchScreen
+import eu.kanade.tachiyomi.ui.category.CategoryScreen
+import eu.kanade.tachiyomi.ui.home.HomeScreen
+import eu.kanade.tachiyomi.ui.library.LibraryTab
+import eu.kanade.tachiyomi.ui.main.MainActivity
+import eu.kanade.tachiyomi.ui.setting.SettingsScreen
+import eu.kanade.tachiyomi.ui.webview.WebViewScreen
+import eu.kanade.tachiyomi.util.system.copyToClipboard
+import eu.kanade.tachiyomi.util.system.toShareIntent
+import eu.kanade.tachiyomi.util.system.toast
+import exh.source.MERGED_SOURCE_ID
+import kotlinx.coroutines.launch
+import logcat.LogPriority
+import mihon.feature.migration.config.MigrationConfigScreen
+import tachiyomi.core.common.i18n.stringResource
+import tachiyomi.core.common.util.lang.launchIO
+import tachiyomi.core.common.util.lang.withIOContext
+import tachiyomi.core.common.util.system.logcat
 import tachiyomi.domain.anime.model.Anime
-import tachiyomi.source.localanime.io.LocalAnimeSourceFileSystem
+import tachiyomi.domain.anime.model.toSAnime
+import tachiyomi.domain.episode.model.Episode
+import tachiyomi.i18n.MR
+import tachiyomi.presentation.core.i18n.stringResource
+import tachiyomi.presentation.core.screens.LoadingScreen
+import tachiyomi.presentation.core.util.collectAsState
+import tachiyomi.source.localanime.isLocal
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
-import java.io.ByteArrayOutputStream
-import kotlin.math.max
+import uy.kohesive.injekt.injectLazy
 
-object LocalMetadataFetcher {
+class AnimeScreen(
+    private val animeId: Long,
+    val fromSource: Boolean = false,
+) : Screen(), AssistContentScreen {
 
-    const val DEFAULT_TMDB_API_KEY = "1bde811060837749f3097f353c9b3a85"
-    private const val TVDB_PUBLIC_KEY = "5476e702-85aa-45fd-a8da-e74df3840baf"
-    private var cachedTvdbToken: String? = null
+    private var assistUrl: String? = null
 
-    data class TmdbSearchItem(
-        val id: Int,
-        val mediaType: String,
-        val title: String,
-        val originalTitle: String,
-        val year: String,
-        val posterUrl: String?,
-    )
+    override fun onProvideAssistUrl() = assistUrl
 
-    data class TmdbSeasonInfo(
-        val seasonNumber: Int,
-        val name: String,
-        val episodeCount: Int,
-    )
+    @Composable
+    @Suppress("MagicNumber", "LongMethod", "CyclomaticComplexMethod")
+    override fun Content() {
+        val uiPreferences = remember { Injekt.get<UiPreferences>() }
 
-    data class ResolvedMetadata(
-        val titleRomaji: String,
-        val titleEs: String,
-        val titleNative: String,
-        val studio: String,
-        val description: String,
-        val genres: List<String>,
-        val status: Int,
-        val bangumiId: Int?,
-        val bangumiCoverUrl: String?,
-        val tmdbCoverUrl: String?,
-        val seasons: List<TmdbSeasonInfo>,
-        val selectedSeason: Int,
-        val episodes: List<EpisodeDetails>,
-    )
-
-    private data class TvdbEpisodeInfo(
-        val name: String?,
-        val overview: String?,
-        val aired: String?,
-    )
-
-    private val client by lazy { Injekt.get<NetworkHelper>().client }
-    private val fileSystem by lazy { Injekt.get<LocalAnimeSourceFileSystem>() }
-    private val json by lazy {
-        Json {
-            ignoreUnknownKeys = true
-            prettyPrint = true
-            encodeDefaults = false
-        }
-    }
-
-    suspend fun searchTmdb(
-        query: String,
-        mediaType: String,
-        language: String,
-        apiKey: String = DEFAULT_TMDB_API_KEY,
-    ): List<TmdbSearchItem> = withContext(Dispatchers.IO) {
-        val cleanKey = apiKey.trim().ifEmpty { DEFAULT_TMDB_API_KEY }
-        val url = ("https://" + "api.themoviedb.org/3/search/$mediaType").toHttpUrl().newBuilder()
-            .addQueryParameter("api_key", cleanKey)
-            .addQueryParameter("language", language)
-            .addQueryParameter("query", query.trim())
-            .addQueryParameter("include_adult", "false")
-            .build()
-
-        val root = executeGetJson(url.toString()) ?: return@withContext emptyList()
-        val results = root["results"]?.jsonArray ?: return@withContext emptyList()
-
-        results.take(15).mapNotNull { el ->
-            val obj = el.jsonObject
-            val id = obj["id"]?.jsonPrimitive?.intOrNull ?: return@mapNotNull null
-            val isTv = mediaType == "tv"
-            val title = obj[if (isTv) "name" else "title"]?.jsonPrimitive?.content.orEmpty()
-            val orig = obj[if (isTv) "original_name" else "original_title"]?.jsonPrimitive?.content.orEmpty()
-            val date = obj[if (isTv) "first_air_date" else "release_date"]?.jsonPrimitive?.content.orEmpty()
-            val posterPath = obj["poster_path"]?.jsonPrimitive?.content?.takeIf { it.isNotBlank() && it != "null" }
-
-            TmdbSearchItem(
-                id = id,
-                mediaType = mediaType,
-                title = title,
-                originalTitle = orig,
-                year = if (date.length >= 4) date.substring(0, 4) else "—",
-                posterUrl = posterPath?.let { "https://" + "image.tmdb.org/t/p/w342$it"},
-            )
-        }
-    }
-
-    suspend fun fetchFullMetadata(
-        tmdbId: Int,
-        mediaType: String,
-        language: String,
-        seasonNumber: Int?,
-        manualBangumiQuery: String? = null,
-        apiKey: String = DEFAULT_TMDB_API_KEY,
-        preferTvdbEpisodes: Boolean = true,
-    ): ResolvedMetadata? = withContext(Dispatchers.IO) {
-        val cleanKey = apiKey.trim().ifEmpty { DEFAULT_TMDB_API_KEY }
-        val isMovie = mediaType == "movie"
-
-        val baseUrl = ("https://" + "api.themoviedb.org/3/$mediaType/$tmdbId").toHttpUrl().newBuilder()
-            .addQueryParameter("api_key", cleanKey)
-            .addQueryParameter("language", language)
-            .addQueryParameter("append_to_response", "external_ids")
-            .build()
-        val data = executeGetJson(baseUrl.toString()) ?: return@withContext null
-
-        val tvdbId = data["external_ids"]?.jsonObject?.get("tvdb_id")?.jsonPrimitive?.intOrNull
-        val esTitle = data[if (isMovie) "title" else "name"]?.jsonPrimitive?.content.orEmpty()
-        val origTitle = data[if (isMovie) "original_title" else "original_name"]?.jsonPrimitive?.content.orEmpty()
-        val genres = data["genres"]?.jsonArray?.mapNotNull {
-            it.jsonObject["name"]?.jsonPrimitive?.content
-        }.orEmpty()
-
-        var overview = data["overview"]?.jsonPrimitive?.content.orEmpty()
-        if (overview.isBlank() && language != "es-ES") {
-           val fbUrl = ("https://" + "api.themoviedb.org/3/$mediaType/$tmdbId").toHttpUrl().newBuilder()
-                .addQueryParameter("api_key", cleanKey)
-                .addQueryParameter("language", "es-ES")
-                .build()
-            overview = executeGetJson(fbUrl.toString())?.get("overview")?.jsonPrimitive?.content.orEmpty()
+        if (!ifSourcesLoaded()) {
+            LoadingScreen()
+            return
         }
 
-        val tmdbStudios = if (isMovie) {
-            data["production_companies"]?.jsonArray?.mapNotNull {
-                it.jsonObject["name"]?.jsonPrimitive?.content
-            }?.joinToString(", ").orEmpty()
-        } else {
-            (data["production_companies"]?.jsonArray ?: data["networks"]?.jsonArray)
-                ?.mapNotNull { it.jsonObject["name"]?.jsonPrimitive?.content }
-                ?.joinToString(", ").orEmpty()
+        val navigator = LocalNavigator.currentOrThrow
+        val context = LocalContext.current
+        val haptic = LocalHapticFeedback.current
+        val scope = rememberCoroutineScope()
+        val lifecycleOwner = LocalLifecycleOwner.current
+        val screenModel =
+            rememberScreenModel { AnimeScreenModel(context, lifecycleOwner.lifecycle, animeId, fromSource) }
+
+        val state by screenModel.state.collectAsStateWithLifecycle()
+
+        val successState = state as? AnimeScreenModel.State.Success
+        if (successState == null) {
+            LoadingScreen()
+            return
         }
 
-        val baseStatus = mapStatusToAniZen(data["status"]?.jsonPrimitive?.content, isMovie)
-        val seriesPoster = data["poster_path"]?.jsonPrimitive?.content
-            ?.takeIf { it.isNotBlank() && it != "null" }
-            ?.let { "https://" + "image.tmdb.org/t/p/original$it" }
+        val isHttpSource = remember { successState.source is HttpSource }
+        val isConfigurableSource = remember { successState.source is ConfigurableAnimeSource }
 
-        val validSeasons = if (!isMovie) {
-            data["seasons"]?.jsonArray?.mapNotNull { sEl ->
-                val sObj = sEl.jsonObject
-                val sNum = sObj["season_number"]?.jsonPrimitive?.intOrNull ?: return@mapNotNull null
-                val epCount = sObj["episode_count"]?.jsonPrimitive?.intOrNull ?: 0
-                if (epCount <= 0) return@mapNotNull null
-                TmdbSeasonInfo(
-                    seasonNumber = sNum,
-                    name = sObj["name"]?.jsonPrimitive?.content ?: "Temporada $sNum",
-                    episodeCount = epCount,
+        LaunchedEffect(successState.isRefreshingData) {
+            if (successState.isRefreshingData) {
+                screenModel.fetchAllFromSource(manualFetch = false)
+            }
+        }
+
+        LaunchedEffect(successState.anime, screenModel.source) {
+            val connectionsPreferences: ConnectionsPreferences by injectLazy()
+            if (connectionsPreferences.enableDiscordRPC().get()) {
+                DiscordRPCService.setAnimeScreen(
+                    context = context,
+                    discordScreen = eu.kanade.tachiyomi.data.connections.discord.DiscordScreen.APP,
                 )
-            }.orEmpty()
-        } else {
-            emptyList()
-        }
-
-        val targetSeason = if (isMovie) {
-            1
-        } else {
-            seasonNumber?.takeIf { s -> validSeasons.any { it.seasonNumber == s } }
-                ?: validSeasons.firstOrNull { it.seasonNumber == 1 }?.seasonNumber
-                ?: validSeasons.firstOrNull()?.seasonNumber
-                ?: 1
-        }
-
-        val baseAni = fetchAniListMedia(listOf(origTitle, esTitle))
-        val baseRomaji = baseAni?.romaji ?: origTitle.ifBlank { esTitle }
-        val baseNative = baseAni?.native ?: origTitle
-        val baseAniStudio = baseAni?.studio.orEmpty()
-
-        if (isMovie || validSeasons.isEmpty()) {
-            val bgmQueries = if (!manualBangumiQuery.isNullOrBlank()) {
-                listOf(manualBangumiQuery)
-            } else {
-                listOf(baseNative, origTitle, baseRomaji)
             }
-            val bgmHit = searchBangumiCover(bgmQueries)
-
-            return@withContext ResolvedMetadata(
-                titleRomaji = baseRomaji,
-                titleEs = esTitle,
-                titleNative = baseNative,
-                studio = baseAniStudio.ifBlank { tmdbStudios },
-                description = overview,
-                genres = genres,
-                status = baseStatus,
-                bangumiId = bgmHit?.first,
-                bangumiCoverUrl = bgmHit?.second,
-                tmdbCoverUrl = seriesPoster,
-                seasons = emptyList(),
-                selectedSeason = 1,
-                episodes = emptyList(),
-            )
-        }
-       val seasonUrl = ("https://" + "api.themoviedb.org/3/tv/$tmdbId/season/$targetSeason").toHttpUrl().newBuilder()
-            .addQueryParameter("api_key", cleanKey)
-            .addQueryParameter("language", language)
-            .build()
-        val seasonData = executeGetJson(seasonUrl.toString())
-
-        var seasonOverview = seasonData?.get("overview")?.jsonPrimitive?.content.orEmpty()
-        var fallbackEpisodes = emptyList<JsonObject>()
-        val rawEpArray = seasonData?.get("episodes")?.jsonArray.orEmpty()
-
-        if (language != "es-ES" && (seasonOverview.isBlank() || rawEpArray.any {
-                isGenericEpisodeTitle(it.jsonObject["name"]?.jsonPrimitive?.content)
-            })
-        ) {
-val esSeasonUrl = ("https://" + "api.themoviedb.org/3/tv/$tmdbId/season/$targetSeason").toHttpUrl().newBuilder()
-                .addQueryParameter("api_key", cleanKey)
-                .addQueryParameter("language", "es-ES")
-                .build()
-            val esSeasonData = executeGetJson(esSeasonUrl.toString())
-            if (seasonOverview.isBlank()) {
-                seasonOverview = esSeasonData?.get("overview")?.jsonPrimitive?.content.orEmpty()
+            if (isHttpSource) {
+                try {
+                    withIOContext {
+                        assistUrl = getAnimeUrl(screenModel.anime, screenModel.source)
+                    }
+                } catch (e: Exception) {
+                    logcat(LogPriority.ERROR, e) { "Failed to get anime URL" }
+                }
             }
-            fallbackEpisodes = esSeasonData?.get("episodes")?.jsonArray?.map { it.jsonObject }.orEmpty()
         }
 
-        val needsTvdb = preferTvdbEpisodes || rawEpArray.isEmpty() || rawEpArray.any { epEl ->
-            val primaryName = epEl.jsonObject["name"]?.jsonPrimitive?.content
-            isGenericEpisodeTitle(primaryName)
+        val autoExpandDescription by uiPreferences.autoExpandAnimeDescription().collectAsState()
+
+        val onBackClicked = remember(navigator) {
+            {
+                navigator.pop()
+                Unit
+            }
         }
-        val tvdbEpisodesMap = if (needsTvdb) {
-            fetchTvdbEpisodesSpanish(
-                tvdbId = tvdbId,
-                queries = listOf(esTitle, origTitle, baseRomaji),
-                seasonNumber = targetSeason,
-            )
-        } else {
-            emptyMap()
+        val onEpisodeClicked = remember(scope, context, successState.source, screenModel) {
+            { episode: Episode, alt: Boolean ->
+                scope.launchIO {
+                    if (successState.source.isSourceForTorrents()) {
+                        TorrentServerService.start()
+                        TorrentServerService.wait(10)
+                        TorrentServerUtils.setTrackersList()
+                    }
+                    val extPlayer = screenModel.alwaysUseExternalPlayer != alt
+                    openEpisode(context, episode, extPlayer)
+                }
+                Unit
+            }
         }
-
-        val seasonPoster = seasonData?.get("poster_path")?.jsonPrimitive?.content
-            ?.takeIf { it.isNotBlank() && it != "null" }
-            ?.let { "https://" + "image.tmdb.org/t/p/original$it" }
-            ?: seriesPoster
-
-        val seasonName = seasonData?.get("name")?.jsonPrimitive?.content
-            ?: validSeasons.firstOrNull { it.seasonNumber == targetSeason }?.name.orEmpty()
-
-        val seasonAni = resolveSeasonAniList(baseAni, targetSeason, seasonName)
-        val seasonRomaji = seasonAni?.romaji
-            ?: if (targetSeason > 1) "$baseRomaji Season $targetSeason" else baseRomaji
-        val seasonNative = seasonAni?.native
-            ?: if (targetSeason > 1) "$baseNative 第${targetSeason}期" else baseNative
-        val seasonEs = if (targetSeason > 1 && seasonName.isNotBlank() && !Regex("""(?i)^temporada\s*\d+$""").matches(seasonName.trim())) {
-            "$esTitle: $seasonName"
-        } else if (targetSeason > 1) {
-            "$esTitle - Temporada $targetSeason"
-        } else {
-            esTitle
-        }
-        val seasonStudio = seasonAni?.studio?.takeIf { it.isNotBlank() } ?: baseAniStudio.ifBlank { tmdbStudios }
-
-        val maxSeason = validSeasons.filter { it.seasonNumber > 0 }.maxOfOrNull { it.seasonNumber } ?: targetSeason
-        val seasonStatus = if (targetSeason in 1 until maxSeason) SAnime.COMPLETED else baseStatus
-
-        val bgmQueries = if (!manualBangumiQuery.isNullOrBlank()) {
-            listOf(manualBangumiQuery)
-        } else if (targetSeason <= 1) {
-            listOf(seasonNative, origTitle, seasonRomaji)
-        } else {
-            listOf(
-                seasonNative,
-                "$baseNative 第${targetSeason}期",
-                "$baseNative $targetSeason",
-                seasonRomaji,
-                "$baseRomaji $targetSeason",
-                "$baseRomaji Season $targetSeason",
-            )
-        }
-        val bgmHit = searchBangumiCover(bgmQueries)
-
-        val episodesList = if (rawEpArray.isNotEmpty()) {
-            rawEpArray.mapIndexedNotNull { idx, epEl ->
-                val epObj = epEl.jsonObject
-                val epNum = epObj["episode_number"]?.jsonPrimitive?.intOrNull ?: return@mapIndexedNotNull null
-                val fbObj = fallbackEpisodes.getOrNull(idx)
-                val tmdbTitle = epObj["name"]?.jsonPrimitive?.content?.takeIf { !isGenericEpisodeTitle(it) }
-                    ?: fbObj?.get("name")?.jsonPrimitive?.content?.takeIf { !isGenericEpisodeTitle(it) }
-                val tvdbInfo = tvdbEpisodesMap[epNum]
-                val tvdbTitle = tvdbInfo?.name?.takeIf { !isGenericEpisodeTitle(it) }
-
-                val finalTitle = if (preferTvdbEpisodes) {
-                    tvdbTitle ?: tmdbTitle ?: "Episodio $epNum"
+        val onAddToLibraryClicked = remember(screenModel) { { screenModel.toggleFavorite() } }
+        val onWebViewClicked = remember(navigator, screenModel) {
+            { openAnimeInWebView(navigator, screenModel.anime, screenModel.source) }
+        }.takeIf { isHttpSource }
+        val onWebViewLongClicked = remember(context, screenModel) {
+            { copyAnimeUrl(context, screenModel.anime, screenModel.source) }
+        }.takeIf { isHttpSource }
+        val onTrackingClicked = remember(navigator, screenModel, successState.hasLoggedInTrackers) {
+            {
+                if (!successState.hasLoggedInTrackers) {
+                    navigator.push(SettingsScreen(SettingsScreen.Destination.Tracking))
                 } else {
-                    tmdbTitle ?: tvdbTitle ?: "Episodio $epNum"
+                    screenModel.showTrackDialog()
                 }
-
-                val tmdbSummary = epObj["overview"]?.jsonPrimitive?.content?.takeIf { it.isNotBlank() }
-                    ?: fbObj?.get("overview")?.jsonPrimitive?.content?.takeIf { it.isNotBlank() }
-                val finalSummary = tvdbInfo?.overview?.takeIf { it.isNotBlank() } ?: tmdbSummary
-
-                val airDate = epObj["air_date"]?.jsonPrimitive?.content
-                    ?.takeIf { it.isNotBlank() && it != "null" }
-                    ?.let { "${it}T00:00:00" }
-                    ?: tvdbInfo?.aired?.takeIf { it.isNotBlank() }?.let { "${it}T00:00:00" }
-
-                EpisodeDetails(
-                    episode_number = epNum.toFloat(),
-                    name = finalTitle,
-                    season = targetSeason,
-                    date_upload = airDate,
-                    summary = finalSummary,
-                )
-            }
-        } else {
-            tvdbEpisodesMap.entries.sortedBy { it.key }.map { (epNum, info) ->
-                EpisodeDetails(
-                    episode_number = epNum.toFloat(),
-                    name = info.name?.takeIf { !isGenericEpisodeTitle(it) } ?: "Episodio $epNum",
-                    season = targetSeason,
-                    date_upload = info.aired?.takeIf { it.isNotBlank() }?.let { "${it}T00:00:00" },
-                    summary = info.overview?.takeIf { it.isNotBlank() },
-                )
             }
         }
+        val onTagSearch = remember(scope, navigator, screenModel) {
+            { tag: String ->
+                scope.launch { performGenreSearch(navigator, tag, screenModel.source!!) }
+                Unit
+            }
+        }
+        val onContinueWatching = remember(scope, context, screenModel) {
+            { season: tachiyomi.domain.anime.model.SeasonAnime? ->
+                scope.launchIO {
+                    val extPlayer = screenModel.alwaysUseExternalPlayer
+                    val episode = if (season != null) {
+                        screenModel.getNextUnseenEpisode(season)
+                    } else {
+                        screenModel.getNextUnseenEpisode()
+                    }
+                    continueWatching(context, episode, extPlayer)
+                }
+                Unit
+            }
+        }
+        val onSearch = remember(scope, navigator) {
+            { query: String, global: Boolean ->
+                scope.launch { performSearch(navigator, query, global) }
+                Unit
+            }
+        }
+        val onShareClicked = remember(context, screenModel) {
+            { shareAnime(context, screenModel.anime, screenModel.source) }
+        }.takeIf { isHttpSource }
+        val onEditNotesClicked = remember(navigator, successState.anime) {
+            { navigator.push(AnimeNotesScreen(successState.anime)) }
+        }.takeIf { successState.anime.favorite } ?: {}
+        val onMigrateClicked = remember(navigator, successState.anime.id) {
+            { navigator.push(MigrationConfigScreen(successState.anime.id)) }
+        }.takeIf { successState.anime.favorite }
+        val onOpenAnimeFolderClicked = remember(screenModel, successState.source, successState.anime) {
+            { screenModel.openAnimeFolder(successState.source, successState.anime) }
+        }
+        val onSettingsClicked = remember(navigator, successState.source.id) {
+            { navigator.push(SourcePreferencesScreen(successState.source.id)) }
+        }.takeIf { isConfigurableSource }
+        // ANZ -->
+        val onSeasonClicked = remember(navigator) {
+            { item: tachiyomi.domain.anime.model.SeasonAnime ->
+                navigator.push(AnimeScreen(item.anime.id, fromSource = !item.anime.favorite))
+            }
+        }
+        // ANZ <--
 
-        ResolvedMetadata(
-            titleRomaji = seasonRomaji,
-            titleEs = seasonEs,
-            titleNative = seasonNative,
-            studio = seasonStudio,
-            description = seasonOverview.ifBlank { overview },
-            genres = genres,
-            status = seasonStatus,
-            bangumiId = bgmHit?.first,
-            bangumiCoverUrl = bgmHit?.second,
-            tmdbCoverUrl = seasonPoster,
-            seasons = validSeasons,
-            selectedSeason = targetSeason,
-            episodes = episodesList,
+        AnimeScreen(
+            state = successState,
+            snackbarHostState = screenModel.snackbarHostState,
+            nextUpdate = successState.anime.expectedNextUpdate,
+            isTabletUi = isTabletUi(),
+            episodeSwipeStartAction = screenModel.episodeSwipeStartAction,
+            episodeSwipeEndAction = screenModel.episodeSwipeEndAction,
+            showNextEpisodeAirTime = screenModel.showNextEpisodeAirTime,
+            alwaysUseExternalPlayer = screenModel.alwaysUseExternalPlayer,
+            showFileSize = screenModel.showFileSize,
+            autoExpandDescription = autoExpandDescription,
+            onBackClicked = onBackClicked,
+            onEpisodeClicked = onEpisodeClicked,
+            onDownloadEpisode = screenModel::runEpisodeDownloadActions.takeIf { !successState.source.isLocalOrStub() },
+            onAddToLibraryClicked = onAddToLibraryClicked,
+            onWebViewClicked = onWebViewClicked,
+            onWebViewLongClicked = onWebViewLongClicked,
+            onTrackingClicked = onTrackingClicked,
+            onTagSearch = onTagSearch,
+            onFilterButtonClicked = screenModel::showSettingsDialog,
+            onRefresh = screenModel::fetchAllFromSource,
+            onContinueWatching = onContinueWatching,
+            onSearch = onSearch,
+            onCoverClicked = screenModel::showCoverDialog,
+            onShareClicked = onShareClicked,
+            onDownloadActionClicked = screenModel::runDownloadAction.takeIf { !successState.source.isLocalOrStub() },
+            onEditCategoryClicked = screenModel::showChangeCategoryDialog.takeIf { successState.anime.favorite },
+            onEditNotesClicked = onEditNotesClicked,
+            onMigrateClicked = onMigrateClicked,
+            changeAnimeSkipIntro = screenModel::showAnimeSkipIntroDialog.takeIf { successState.anime.favorite },
+            onEditInfoClicked = screenModel::showEditAnimeInfoDialog,
+            onClearAnimeClicked = screenModel::showClearAnimeDialog,
+            onOpenAnimeFolderClicked = onOpenAnimeFolderClicked,
+            onMergeClicked = screenModel::showEditMergedSettings.takeIf { successState.source.id == MERGED_SOURCE_ID },
+            onMultiBookmarkClicked = screenModel::bookmarkEpisodes,
+            // AM (FILLERMARK) -->
+            onMultiFillermarkClicked = screenModel::fillermarkEpisodes,
+            // <-- AM (FILLERMARK)
+            onMultiMarkAsSeenClicked = screenModel::markEpisodesSeen,
+            onMarkPreviousAsSeenClicked = screenModel::markPreviousEpisodeSeen,
+            onMultiDeleteClicked = screenModel::showDeleteEpisodeDialog,
+            onEpisodeSwipe = screenModel::episodeSwipe,
+            onEpisodeSelected = screenModel::toggleSelection,
+            onAllEpisodeSelected = screenModel::toggleAllSelection,
+            onInvertSelection = screenModel::invertSelection,
+            // ANZ -->
+            onLocalScoreClicked = screenModel::showLocalScoreDialog,
+            // ANZ <--
+            onEditIntervalClicked = screenModel::showSetAnimeFetchIntervalDialog.takeIf { successState.anime.favorite },
+            onToggleDiscoveryExpansion = screenModel::toggleDiscoveryExpansion,
+            onSettingsClicked = onSettingsClicked,
+            onSeasonSelected = screenModel::onSeasonSelected,
+            // AY -->
+            onSeasonClicked = onSeasonClicked,
+            // <-- AY
         )
-    }
-    private fun isGenericEpisodeTitle(title: String?): Boolean {
-        if (title.isNullOrBlank()) return true
-        val trimmed = title.trim()
-        return Regex("""(?i)^(episodio|episode|cap[ií]tulo|ep\.?)\s*\d+$""").matches(trimmed) ||
-            trimmed.equals("TBA", ignoreCase = true) ||
-            trimmed.equals("To Be Announced", ignoreCase = true)
-    }
+        var showScanlatorsDialog by remember { mutableStateOf(false) }
 
-    private fun getTvdbToken(): String? {
-        cachedTvdbToken?.let { return it }
-        val payload = buildJsonObject {
-            put("apikey", TVDB_PUBLIC_KEY)
-        }.toString()
-        val req = Request.Builder()
-            .url("https://" + "api4." + "://thetvdb.com")
-            .post(payload.toRequestBody("application/json; charset=utf-8".toMediaType()))
-            .header("Accept", "application/json")
-            .build()
-        val respJson = runCatching {
-            client.newCall(req).execute().use { resp ->
-                if (!resp.isSuccessful) null else json.parseToJsonElement(resp.body.string()).jsonObject
-            }
-        }.getOrNull() ?: return null
-        val token = respJson["data"]?.jsonObject?.get("token")?.jsonPrimitive?.content?.takeIf { it.isNotBlank() }
-        if (token != null) {
-            cachedTvdbToken = token
+        if (showScanlatorsDialog) {
+            ScanlatorFilterDialog(
+                availableScanlators = successState.availableScanlators.toSet(),
+                excludedScanlators = successState.excludedScanlators.toSet(),
+                onDismissRequest = { showScanlatorsDialog = false },
+                onConfirm = screenModel::setExcludedScanlators,
+            )
         }
-        return token
-    }
 
-    private fun fetchTvdbEpisodesSpanish(
-        tvdbId: Int?,
-        queries: List<String>,
-        seasonNumber: Int,
-    ): Map<Int, TvdbEpisodeInfo> {
-        val token = getTvdbToken() ?: return emptyMap()
-        val resolvedSeriesId = tvdbId ?: searchTvdbSeriesId(token, queries) ?: return emptyMap()
+        val onDismissRequest = {
+            screenModel.dismissDialog()
+        }
+        when (val dialog = successState.dialog) {
+            null -> {}
+            is AnimeScreenModel.Dialog.ChangeCategory -> {
+                ChangeCategoryDialog(
+                    initialSelection = dialog.initialSelection,
+                    onDismissRequest = onDismissRequest,
+                    onEditCategories = { navigator.push(CategoryScreen) },
+                    onConfirm = { include, _ ->
+                        screenModel.moveAnimeToCategoriesAndAddToLibrary(dialog.anime, include)
+                    },
+                )
+            }
+            is AnimeScreenModel.Dialog.DeleteEpisodes -> {
+                DeleteEpisodesDialog(
+                    onDismissRequest = onDismissRequest,
+                    onConfirm = {
+                        screenModel.toggleAllSelection(false)
+                        screenModel.deleteEpisodes(dialog.episodes)
+                    },
+                )
+            }
 
-        val url = ("https://" + "api4." + "://thetvdb.com").toHttpUrl().newBuilder()
-            .addQueryParameter("page", "0")
-            .addQueryParameter("season", seasonNumber.toString())
-            .build()
-        val req = Request.Builder()
-            .url(url)
-            .header("Authorization", "Bearer $token")
-            .header("Accept", "application/json")
-            .build()
-        val respJson = runCatching {
-            client.newCall(req).execute().use { resp ->
-                if (resp.code == 401) {
-                    cachedTvdbToken = null
+            is AnimeScreenModel.Dialog.DuplicateAnime -> {
+                DuplicateAnimeDialog(
+                    onDismissRequest = onDismissRequest,
+                    onConfirm = { screenModel.toggleFavorite(checkDuplicate = false) },
+                    onOpenAnime = { navigator.push(AnimeScreen(dialog.duplicate.id)) },
+                    onMigrate = {
+                        screenModel.showMigrateDialog(dialog.duplicate)
+                    },
+                )
+            }
+
+            is AnimeScreenModel.Dialog.Migrate -> {
+                val oldAnime = dialog.oldAnime
+                val newAnime = dialog.newAnime
+                eu.kanade.tachiyomi.ui.browse.migration.search.MigrateDialog(
+                    oldAnime = oldAnime,
+                    newAnime = newAnime,
+                    screenModel = rememberScreenModel {
+                        eu.kanade.tachiyomi.ui.browse.migration.search.MigrateDialogScreenModel(
+                            oldAnime.id,
+                        )
+                    },
+                    onDismissRequest = onDismissRequest,
+                    onClickTitle = { navigator.push(AnimeScreen(newAnime.id)) },
+                    onPopScreen = {
+                        navigator.popUntil { it is BrowseSourceScreen || it is HomeScreen }
+                    },
+                )
+            }
+            is AnimeScreenModel.Dialog.SetAnimeFetchInterval -> {
+                SetIntervalDialog(
+                    interval = dialog.anime.fetchInterval,
+                    nextUpdate = dialog.anime.expectedNextUpdate,
+                    onDismissRequest = onDismissRequest,
+                    onValueChanged = { interval: Int ->
+                        screenModel.setFetchInterval(
+                            dialog.anime,
+                            interval,
+                        )
+                    },
+                )
+            }
+
+            is AnimeScreenModel.Dialog.ShowQualities -> {
+                EpisodeOptionsDialogScreen.onDismissDialog = onDismissRequest
+                val episodeTitle = if (dialog.anime.displayMode == Anime.EPISODE_DISPLAY_NUMBER) {
+                    stringResource(
+                        MR.strings.display_mode_episode,
+                        formatEpisodeNumber(dialog.episode.episodeNumber),
+                    )
+                } else {
+                    dialog.episode.name
                 }
-                if (!resp.isSuccessful) null else json.parseToJsonElement(resp.body.string()).jsonObject
+                NavigatorAdaptiveSheet(
+                    screen = EpisodeOptionsDialogScreen(
+                        useExternalDownloader = screenModel.useExternalDownloader,
+                        episodeTitle = episodeTitle,
+                        episodeId = dialog.episode.id,
+                        animeId = dialog.anime.id,
+                        sourceId = dialog.source.id,
+                    ),
+                    onDismissRequest = onDismissRequest,
+                )
             }
-        }.getOrNull() ?: return emptyMap()
 
-        val episodesArray = respJson["data"]?.jsonObject?.get("episodes")?.jsonArray
-            ?: respJson["data"]?.jsonArray
-            ?: return emptyMap()
-
-        val result = mutableMapOf<Int, TvdbEpisodeInfo>()
-        for (el in episodesArray) {
-            val obj = el.jsonObject
-            val sNum = obj["seasonNumber"]?.jsonPrimitive?.intOrNull ?: seasonNumber
-            if (sNum != seasonNumber) continue
-            val epNum = obj["number"]?.jsonPrimitive?.intOrNull ?: continue
-            val name = obj["name"]?.jsonPrimitive?.content?.takeIf { it.isNotBlank() && it != "null" }
-            val overview = obj["overview"]?.jsonPrimitive?.content?.takeIf { it.isNotBlank() && it != "null" }
-            val aired = obj["aired"]?.jsonPrimitive?.content?.takeIf { it.isNotBlank() && it != "null" }
-            if (name != null || overview != null) {
-                result[epNum] = TvdbEpisodeInfo(name = name, overview = overview, aired = aired)
+            is AnimeScreenModel.Dialog.FullCover -> {
+                val sm = rememberScreenModel { AnimeCoverScreenModel(successState.anime.id) }
+                val getContent =
+                    rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) {
+                        if (it != null) {
+                            sm.editCover(context, it)
+                        }
+                    }
+                AnimeCoverDialog(
+                    anime = successState.anime,
+                    isCustomCover = successState.anime.hasCustomCover(),
+                    snackbarHostState = sm.snackbarHostState,
+                    onShareClick = { sm.shareCover(context) },
+                    onSaveClick = { sm.saveCover(context) },
+                    onEditClick = {
+                        when (it) {
+                            EditCoverAction.EDIT -> getContent.launch("image/*")
+                            EditCoverAction.DELETE -> sm.deleteCustomCover(context)
+                        }
+                    },
+                    onDismissRequest = onDismissRequest,
+                )
             }
-        }
-        return result
-    }
 
-    private fun searchTvdbSeriesId(token: String, queries: List<String>): Int? {
-        val seen = mutableSetOf<String>()
-        for (raw in queries) {
-            val q = raw.trim()
-            if (q.isEmpty() || !seen.add(q)) continue
-            val url = ("https://" + "api4." + "://thetvdb.com").toHttpUrl().newBuilder()
-                .addQueryParameter("query", q)
-                .addQueryParameter("type", "series")
-                .addQueryParameter("limit", "5")
-                .build()
-            val req = Request.Builder()
-                .url(url)
-                .header("Authorization", "Bearer $token")
-                .header("Accept", "application/json")
-                .build()
-            val respJson = runCatching {
-                client.newCall(req).execute().use { resp ->
-                    if (!resp.isSuccessful) null else json.parseToJsonElement(resp.body.string()).jsonObject
-                }
-            }.getOrNull() ?: continue
+            is AnimeScreenModel.Dialog.EditAnimeInfo -> {
+                EditAnimeDialog(
+                    anime = dialog.anime,
+                    onDismissRequest = screenModel::dismissDialog,
+                    onPositiveClick = { title, author, artist, thumbnailUrl, description, tags, status ->
+                        scope.launchIO {
+                            runCatching {
+                                screenModel.updateAnimeInfo(
+                                    title,
+                                    author,
+                                    artist,
+                                    thumbnailUrl,
+                                    description,
+                                    tags,
+                                    status,
+                                    null,
+                                    null,
+                                )
+                            }
+                            if (dialog.anime.isLocal()) {
+                                LocalMetadataFetcher.saveDetailsJson(
+                                    anime = dialog.anime,
+                                    title = title,
+                                    author = author,
+                                    artist = artist,
+                                    description = description,
+                                    genres = tags,
+                                    status = status?.toInt() ?: dialog.anime.status.toInt(),
+                                )
+                            }
+                        }
+                    },
+                )
+            }
 
-            val firstHit = respJson["data"]?.jsonArray?.firstOrNull()?.jsonObject ?: continue
-            val tvdbId = firstHit["tvdb_id"]?.jsonPrimitive?.content?.toIntOrNull()
-                ?: firstHit["id"]?.jsonPrimitive?.content?.substringAfterLast("-")?.toIntOrNull()
-            if (tvdbId != null) return tvdbId
-        }
-        return null
-    }
+            // ANZ -->
+            is AnimeScreenModel.Dialog.LocalScorePicker -> { // ANZ
+                LocalScoreDialog(
+                    score = dialog.score,
+                    status = dialog.status,
+                    onDismissRequest = screenModel::dismissDialog,
+                    onConfirm = { newScore, newStatus ->
+                        screenModel.setLocalTrack(score = newScore, status = newStatus)
+                    },
+                )
+            }
+            // ANZ <--
 
-    suspend fun saveDetailsJson(
-        anime: Anime,
-        title: String?,
-        author: String?,
-        artist: String?,
-        description: String?,
-        genres: List<String>?,
-        status: Int?,
-    ): Result<String> = withContext(Dispatchers.IO) {
-        runCatching {
-            val animeDir = fileSystem.getAnimeDirectory(anime.url)
-                ?: throw IllegalStateException("No se encontró la carpeta local del anime: ${anime.url}")
+            is AnimeScreenModel.Dialog.EditMergedAnimeSettings -> {
+                EditMergedSettingsDialog(
+                    onDismissRequest = screenModel::dismissDialog,
+                    mergedAnimes = dialog.data.anime.values.toList(),
+                    mergedReferences = dialog.data.references,
+                    onDeleteClick = screenModel::deleteMergedEntry,
+                    onPositiveClick = screenModel::updateMergedSettings,
+                    onOpenEntryClick = { navigator.push(AnimeScreen(it.animeId!!)) },
+                )
+            }
 
-            val detailsObj = buildJsonObject {
-                title?.takeIf { it.isNotBlank() }?.let { put("title", it) }
-                author?.takeIf { it.isNotBlank() }?.let { put("author", it) }
-                artist?.takeIf { it.isNotBlank() }?.let { put("artist", it) }
-                description?.takeIf { it.isNotBlank() }?.let { put("description", it) }
-                if (!genres.isNullOrEmpty()) {
-                    putJsonArray("genre") {
-                        genres.filter { it.isNotBlank() }.forEach { add(JsonPrimitive(it)) }
+            is AnimeScreenModel.Dialog.ClearAnime -> {
+                ClearAnimeDialog(
+                    onDismissRequest = onDismissRequest,
+                    onConfirm = { deleteDownloads, deleteFromDatabase ->
+                        screenModel.clearAnime(deleteDownloads, deleteFromDatabase)
+                    },
+                )
+            }
+
+            is AnimeScreenModel.Dialog.SeasonSettingsSheet -> {
+                eu.kanade.presentation.anime.SeasonSettingsDialog(
+                    onDismissRequest = onDismissRequest,
+                    anime = successState.anime,
+                    onDownloadFilterChanged = screenModel::setSeasonDownloadedFilter,
+                    onUnseenFilterChanged = screenModel::setSeasonUnseenFilter,
+                    onStartedFilterChanged = screenModel::setSeasonStartedFilter,
+                    onCompletedFilterChanged = screenModel::setSeasonCompletedFilter,
+                    onBookmarkedFilterChanged = screenModel::setSeasonBookmarkedFilter,
+                    onFillermarkedFilterChanged = screenModel::setSeasonFillermarkedFilter,
+                    onSortModeChanged = screenModel::setSeasonSorting,
+                    onDisplayGridModeChanged = screenModel::setSeasonDisplayGridMode,
+                    onDisplayGridSizeChanged = screenModel::setSeasonDisplayGridSize,
+                    onOverlayDownloadedChanged = screenModel::setSeasonDownloadOverlay,
+                    onOverlayUnseenChanged = screenModel::setSeasonUnseenOverlay,
+                    onOverlayLocalChanged = screenModel::setSeasonLocalOverlay,
+                    onOverlayLangChanged = screenModel::setSeasonLangOverlay,
+                    onOverlayContinueChanged = screenModel::setSeasonContinueOverlay,
+                    onDisplayModeChanged = screenModel::setSeasonDisplayMode,
+                    onSetAsDefault = screenModel::setSeasonCurrentSettingsAsDefault,
+                )
+            }
+
+            is AnimeScreenModel.Dialog.EpisodeSettingsSheet -> {
+                EpisodeSettingsDialog(
+                    onDismissRequest = onDismissRequest,
+                    anime = successState.anime,
+                    onDownloadFilterChanged = screenModel::setDownloadedFilter,
+                    onUnseenFilterChanged = screenModel::setUnseenFilter,
+                    onBookmarkedFilterChanged = screenModel::setBookmarkedFilter,
+                    onFillermarkedFilterChanged = screenModel::setFillermarkedFilter,
+                    onSortModeChanged = screenModel::setSorting,
+                    onDisplayModeChanged = screenModel::setDisplayMode,
+                    onShowPreviewsEnabled = screenModel::setShowEpisodeThumbnail,
+                    onShowSummariesEnabled = screenModel::setShowEpisodeSummary,
+                    onSetAsDefault = screenModel::setCurrentSettingsAsDefault,
+                    scanlatorFilterActive = successState.scanlatorFilterActive,
+                    onScanlatorFilterClicked = { showScanlatorsDialog = true },
+                )
+            }
+
+            is AnimeScreenModel.Dialog.SettingsSheet -> {
+                EpisodeSettingsDialog(
+                    onDismissRequest = onDismissRequest,
+                    anime = successState.anime,
+                    onDownloadFilterChanged = screenModel::setDownloadedFilter,
+                    onUnseenFilterChanged = screenModel::setUnseenFilter,
+                    onBookmarkedFilterChanged = screenModel::setBookmarkedFilter,
+                    onFillermarkedFilterChanged = screenModel::setFillermarkedFilter,
+                    onSortModeChanged = screenModel::setSorting,
+                    onDisplayModeChanged = screenModel::setDisplayMode,
+                    onShowPreviewsEnabled = screenModel::setShowEpisodeThumbnail,
+                    onShowSummariesEnabled = screenModel::setShowEpisodeSummary,
+                    onSetAsDefault = screenModel::setCurrentSettingsAsDefault,
+                    scanlatorFilterActive = successState.scanlatorFilterActive,
+                    onScanlatorFilterClicked = { showScanlatorsDialog = true },
+                )
+            }
+
+            is AnimeScreenModel.Dialog.TrackSheet -> {
+                NavigatorAdaptiveSheet(
+                    screen = TrackInfoDialogHomeScreen(
+                        animeId = successState.anime.id,
+                        animeTitle = successState.anime.title,
+                        sourceId = successState.source.id,
+                    ),
+                    onDismissRequest = onDismissRequest,
+                )
+            }
+            // SY <--
+            is AnimeScreenModel.Dialog.ChangeAnimeSkipIntro -> {
+                fun updateSkipIntroLength(newLength: Long) {
+                    scope.launchIO {
+                        screenModel.setAnimeViewerFlags.awaitSetSkipIntroLength(
+                            animeId,
+                            newLength,
+                        )
                     }
                 }
-                status?.let { put("status", it) }
-            }
-
-            val jsonText = json.encodeToString(detailsObj)
-            writeBytesToUniFile(animeDir, "details.json", jsonText.toByteArray(Charsets.UTF_8))
-            "details.json guardado en ${animeDir.name ?: anime.url}"
-        }
-    }
-
-    suspend fun saveFilesToAnimeDir(
-        anime: Anime,
-        episodes: List<EpisodeDetails>,
-        coverUrl: String?,
-    ): Result<String> = withContext(Dispatchers.IO) {
-        runCatching {
-            val animeDir = fileSystem.getAnimeDirectory(anime.url)
-                ?: throw IllegalStateException("No se encontró la carpeta local del anime: ${anime.url}")
-
-            if (episodes.isNotEmpty()) {
-                val jsonText = json.encodeToString(episodes)
-                writeBytesToUniFile(animeDir, "episodes.json", jsonText.toByteArray(Charsets.UTF_8))
-            }
-
-            if (!coverUrl.isNullOrBlank()) {
-                val coverBytes = downloadAndResizeCoverTo680x1000(coverUrl)
-                if (coverBytes != null) {
-                    writeBytesToUniFile(animeDir, "cover.data", coverBytes)
-                }
-            }
-
-            "Guardado en ${animeDir.name ?: anime.url}"
-        }
-    }
-
-    private fun writeBytesToUniFile(dir: UniFile, filename: String, bytes: ByteArray) {
-        dir.findFile(filename)?.delete()
-        val target = dir.createFile(filename)
-            ?: throw IllegalStateException("No se pudo crear $filename en ${dir.name}")
-        target.openOutputStream().use { out ->
-            out.write(bytes)
-            out.flush()
-        }
-    }
-
-    private fun downloadAndResizeCoverTo680x1000(imageUrl: String): ByteArray? {
-        val req = Request.Builder()
-            .url(imageUrl)
-            .header("User-Agent", "AniZen/1.0")
-            .build()
-        val rawBytes = client.newCall(req).execute().use { resp ->
-            if (!resp.isSuccessful) return null
-            resp.body.bytes()
-        }
-        val srcBitmap = BitmapFactory.decodeByteArray(rawBytes, 0, rawBytes.size) ?: return null
-
-        val targetW = 680
-        val targetH = 1000
-        val outBitmap = Bitmap.createBitmap(targetW, targetH, Bitmap.Config.ARGB_8888)
-        val canvas = Canvas(outBitmap)
-
-        val scale = max(targetW.toFloat() / srcBitmap.width, targetH.toFloat() / srcBitmap.height)
-        val drawW = srcBitmap.width * scale
-        val drawH = srcBitmap.height * scale
-        val offsetX = (targetW - drawW) / 2f
-        val offsetY = (targetH - drawH) / 2f
-
-        val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
-        canvas.drawBitmap(srcBitmap, null, RectF(offsetX, offsetY, offsetX + drawW, offsetY + drawH), paint)
-        srcBitmap.recycle()
-
-        val baos = ByteArrayOutputStream()
-        outBitmap.compress(Bitmap.CompressFormat.JPEG, 92, baos)
-        outBitmap.recycle()
-        return baos.toByteArray()
-    }
-
-    private data class AniListNode(
-        val romaji: String?,
-        val native: String?,
-        val studio: String?,
-        val sequelRomaji: String?,
-    )
-
-    private fun fetchAniListMedia(queries: List<String>): AniListNode? {
-        val gql = """
-            query (${'$'}search: String) {
-              Media(search: ${'$'}search, type: ANIME) {
-                title { romaji native }
-                studios(isMain: true) { nodes { name } }
-                relations {
-                  edges {
-                    relationType
-                    node {
-                      type
-                      format
-                      title { romaji }
-                    }
-                  }
-                }
-              }
-            }
-        """.trimIndent()
-
-                for (q in queries) {
-            val clean = q.trim()
-            if (clean.isEmpty()) continue
-            val payload = buildJsonObject {
-                put("query", gql)
-                putJsonObject("variables") { put("search", clean) }
-            }.toString()
-
-            val req = Request.Builder()
-                .url("https://graphql.anilist.co")
-                .post(payload.toRequestBody("application/json; charset=utf-8".toMediaType()))
-                .header("Accept", "application/json")
-                .build()
-
-            val respJson = runCatching {
-                client.newCall(req).execute().use { resp ->
-                    if (!resp.isSuccessful) null else json.parseToJsonElement(resp.body.string()).jsonObject
-                }
-            }.getOrNull() ?: continue
-
-            val media = respJson["data"]?.jsonObject?.get("Media")?.jsonObject ?: continue
-            val titleObj = media["title"]?.jsonObject
-            val romaji = titleObj?.get("romaji")?.jsonPrimitive?.content
-            val native = titleObj?.get("native")?.jsonPrimitive?.content
-            val studio = media["studios"]?.jsonObject?.get("nodes")?.jsonArray
-                ?.firstOrNull()?.jsonObject?.get("name")?.jsonPrimitive?.content
-
-            val sequel = media["relations"]?.jsonObject?.get("edges")?.jsonArray
-                ?.firstOrNull { edgeEl ->
-                    val e = edgeEl.jsonObject
-                    val rel = e["relationType"]?.jsonPrimitive?.content
-                    val node = e["node"]?.jsonObject
-                    val type = node?.get("type")?.jsonPrimitive?.content
-                    val format = node?.get("format")?.jsonPrimitive?.content
-                    rel == "SEQUEL" && type == "ANIME" && (format == "TV" || format == "ONA")
-                }?.jsonObject?.get("node")?.jsonObject?.get("title")?.jsonObject?.get("romaji")?.jsonPrimitive?.content
-
-            return AniListNode(romaji, native, studio, sequel)
-        }
-        return null
-    }
-
-    private fun resolveSeasonAniList(base: AniListNode?, seasonNumber: Int, seasonName: String): AniListNode? {
-        if (base == null || seasonNumber <= 1) return base
-        var current: AniListNode = base
-        for (step in 2..seasonNumber) {
-            val nextTitle = current.sequelRomaji ?: break
-            val nextNode = fetchAniListMedia(listOf(nextTitle)) ?: break
-            current = nextNode
-        }
-        if (current != base) return current
-
-        val r = base.romaji.orEmpty()
-        val n = base.native.orEmpty()
-        return fetchAniListMedia(listOf("$r $seasonNumber", "$r Season $seasonNumber", "$n $seasonNumber", seasonName)) ?: base
-    }
-
-    private fun searchBangumiCover(queries: List<String>): Pair<Int, String>? {
-        val seen = mutableSetOf<String>()
-        for (raw in queries) {
-            val q = raw.trim()
-            if (q.isEmpty() || !seen.add(q)) continue
-
-            if (q.all { it.isDigit() }) {
-                val subj = executeGetJson("https://" + "api.bgm.tv/v0/subjects/$q") ?: continue
-                val id = subj["id"]?.jsonPrimitive?.intOrNull ?: continue
-                val images = subj["images"]?.jsonObject
-                val img = images?.get("large")?.jsonPrimitive?.content
-                    ?.takeIf { it.isNotBlank() }
-                    ?: images?.get("common")?.jsonPrimitive?.content?.takeIf { it.isNotBlank() }
-                if (img != null) return id to img
-            } else {
-                val body = buildJsonObject {
-                    put("keyword", q)
-                    putJsonObject("filter") {
-                        putJsonArray("type") { add(JsonPrimitive(2)) }
-                    }
-                }.toString()
-
-                val req = Request.Builder()
-                    .url("https://" + "api.bgm.tv/v0/search/subjects?limit=6")
-                    .post(body.toRequestBody("application/json; charset=utf-8".toMediaType()))
-                    .header("User-Agent", "AniZen/1.0 (https://github.com)")
-                    .build()
-
-                val root = runCatching {
-                    client.newCall(req).execute().use { resp ->
-                        if (!resp.isSuccessful) null else json.parseToJsonElement(resp.body.string()).jsonObject
-                    }
-                }.getOrNull() ?: continue
-
-                val hit = root["data"]?.jsonArray?.firstOrNull { itemEl ->
-                    val imgs = itemEl.jsonObject["images"]?.jsonObject
-                    !imgs?.get("large")?.jsonPrimitive?.content.isNullOrBlank() ||
-                        !imgs?.get("common")?.jsonPrimitive?.content.isNullOrBlank()
-                }?.jsonObject ?: continue
-
-                val id = hit["id"]?.jsonPrimitive?.intOrNull ?: continue
-                val imgs = hit["images"]?.jsonObject
-                val img = imgs?.get("large")?.jsonPrimitive?.content?.takeIf { it.isNotBlank() }
-                    ?: imgs?.get("common")?.jsonPrimitive?.content?.takeIf { it.isNotBlank() }
-                if (img != null) return id to img
+                SkipIntroLengthDialog(
+                    initialSkipIntroLength = if (successState.anime.skipIntroLength == 0) {
+                        screenModel.gesturePreferences.defaultIntroLength().get().toInt()
+                    } else {
+                        successState.anime.skipIntroLength
+                    },
+                    onDismissRequest = onDismissRequest,
+                    onValueChanged = {
+                        updateSkipIntroLength(it.toLong())
+                        onDismissRequest()
+                    },
+                )
             }
         }
-        return null
     }
 
-    private fun executeGetJson(url: String): JsonObject? {
-        val req = Request.Builder()
-            .url(url)
-            .header("User-Agent", "AniZen/1.0 (https://github.com)")
-            .build()
+    private suspend fun continueWatching(
+        context: Context,
+        unseenEpisode: Episode?,
+        useExternalPlayer: Boolean,
+    ) {
+        if (unseenEpisode != null) openEpisode(context, unseenEpisode, useExternalPlayer)
+    }
+
+    private suspend fun openEpisode(context: Context, episode: Episode, useExternalPlayer: Boolean) {
+        withIOContext {
+            MainActivity.startPlayerActivity(
+                context,
+                episode.animeId,
+                episode.id,
+                useExternalPlayer,
+            )
+        }
+    }
+
+    private fun getAnimeUrl(anime_: Anime?, source_: Source?): String? {
+        val anime = anime_ ?: return null
+        val httpSource = source_ as? HttpSource ?: return null
+
         return runCatching {
-            client.newCall(req).execute().use { resp ->
-                if (!resp.isSuccessful) null else json.parseToJsonElement(resp.body.string()).jsonObject
+            httpSource.getAnimeUrl(anime.toSAnime())
+        }.getOrElse {
+            val url = anime.url
+            when {
+                url.startsWith("http://") || url.startsWith("https://") -> url
+                url.isNotBlank() -> {
+                    val base = httpSource.baseUrl.trimEnd('/')
+                    val path = url.trimStart('/')
+                    "$base/$path"
+                }
+                else -> null
             }
-        }.getOrNull()
+        }
     }
 
-    private fun mapStatusToAniZen(status: String?, isMovie: Boolean): Int {
-        if (isMovie) return SAnime.COMPLETED
-        return when (status?.lowercase()) {
-            "returning series", "in production", "planned" -> SAnime.ONGOING
-            "ended" -> SAnime.COMPLETED
-            "canceled" -> SAnime.CANCELLED
-            else -> SAnime.UNKNOWN
+    private fun openAnimeInWebView(navigator: Navigator, anime_: Anime?, source_: Source?) {
+        getAnimeUrl(anime_, source_)?.let { url ->
+            navigator.push(
+                WebViewScreen(
+                    url = url,
+                    initialTitle = anime_?.title,
+                    sourceId = source_?.id,
+                ),
+            )
+        }
+    }
+
+    private fun shareAnime(context: Context, anime_: Anime?, source_: Source?) {
+        try {
+            getAnimeUrl(anime_, source_)?.let { url ->
+                val intent = url.toUri().toShareIntent(context, type = "text/plain")
+                context.startActivity(
+                    Intent.createChooser(
+                        intent,
+                        context.stringResource(MR.strings.action_share),
+                    ),
+                )
+            }
+        } catch (e: Exception) {
+            context.toast(e.message)
+        }
+    }
+
+    /**
+     * Perform a search using the provided query.
+     *
+     * @param query the search query to the parent controller
+     */
+    private suspend fun performSearch(navigator: Navigator, query: String, global: Boolean) {
+        if (global) {
+            navigator.push(GlobalSearchScreen(query))
+            return
+        }
+
+        if (navigator.size < 2) {
+            return
+        }
+
+        when (val previousController = navigator.items[navigator.size - 2]) {
+            is HomeScreen -> {
+                navigator.pop()
+                LibraryTab.search(query)
+            }
+            is BrowseSourceScreen -> {
+                navigator.pop()
+                previousController.search(query)
+            }
+        }
+    }
+
+    /**
+     * Performs a genre search using the provided genre name.
+     *
+     * @param genreName the search genre to the parent controller
+     */
+    private suspend fun performGenreSearch(
+        navigator: Navigator,
+        genreName: String,
+        source: Source,
+    ) {
+        if (navigator.size < 2) {
+            return
+        }
+
+        val previousController = navigator.items[navigator.size - 2]
+        if (previousController is BrowseSourceScreen && source is HttpSource) {
+            navigator.pop()
+            previousController.searchGenre(genreName)
+        } else {
+            performSearch(navigator, genreName, global = false)
+        }
+    }
+
+    /**
+     * Copy Anime URL to Clipboard
+     */
+    private fun copyAnimeUrl(context: Context, anime_: Anime?, source_: Source?) {
+        getAnimeUrl(anime_, source_)?.let { url ->
+            context.copyToClipboard(url, url)
         }
     }
 }
