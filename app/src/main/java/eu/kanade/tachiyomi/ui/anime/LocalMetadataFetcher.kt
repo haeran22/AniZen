@@ -475,6 +475,37 @@ object LocalMetadataFetcher {
         }
         return null
     }
+         suspend fun saveDetailsJson(
+        anime: Anime,
+        title: String?,
+        author: String?,
+        artist: String?,
+        description: String?,
+        genres: List<String>?,
+        status: Int?,
+    ): Result<String> = withContext(Dispatchers.IO) {
+        runCatching {
+            val animeDir = fileSystem.getAnimeDirectory(anime.url)
+                ?: throw IllegalStateException("No se encontró la carpeta local del anime: ${anime.url}")
+
+            val detailsObj = buildJsonObject {
+                title?.takeIf { it.isNotBlank() }?.let { put("title", it) }
+                author?.takeIf { it.isNotBlank() }?.let { put("author", it) }
+                artist?.takeIf { it.isNotBlank() }?.let { put("artist", it) }
+                description?.takeIf { it.isNotBlank() }?.let { put("description", it) }
+                if (!genres.isNullOrEmpty()) {
+                    putJsonArray("genre") {
+                        genres.filter { it.isNotBlank() }.forEach { add(JsonPrimitive(it)) }
+                    }
+                }
+                status?.let { put("status", it) }
+            }
+
+            val jsonText = json.encodeToString(detailsObj)
+            writeBytesToUniFile(animeDir, "details.json", jsonText.toByteArray(Charsets.UTF_8))
+            "details.json guardado en ${animeDir.name ?: anime.url}"
+        }
+    }
 
     suspend fun saveFilesToAnimeDir(
         anime: Anime,
@@ -552,8 +583,8 @@ object LocalMetadataFetcher {
 
     private fun fetchAniListMedia(queries: List<String>): AniListNode? {
         val gql = """
-            query (\${'$'}search: String) {
-              Media(search: \${'$'}search, type: ANIME) {
+query (${'$'}search: String) {
+  Media(search: ${'$'}search, type: ANIME) {
                 title { romaji native }
                 studios(isMain: true) { nodes { name } }
                 relations {
