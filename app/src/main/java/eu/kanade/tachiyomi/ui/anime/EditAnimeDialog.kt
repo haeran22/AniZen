@@ -147,11 +147,11 @@ fun EditAnimeDialog(
                             }
                             .root
                     },
-                    modifier = Modifier.fillMaxWidth(),
-                )
-            }
+                               loadCover(anime, currentBinding)
         },
     )
+}
+)
 
     if (showTrackerSelectionDialogue.value) {
         TrackerSelectDialog(
