@@ -1,6 +1,5 @@
 package mihon.feature.migration.list
 
-import eu.kanade.tachiyomi.ui.anime.AnimeScreen
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.runtime.Composable
