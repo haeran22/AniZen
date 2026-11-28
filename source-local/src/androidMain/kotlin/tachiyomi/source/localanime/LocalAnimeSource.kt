@@ -384,7 +384,7 @@ actual class LocalAnimeSource(
                         }
 
                         matchedData?.also { data ->
-                            data.name?.also { name = it }
+                            data.name?.takeIf { it.isNotBlank() }?.also { name = "\u200B$it" }
                             data.date_upload?.also { date_upload = parseDate(it) }
                             scanlator = data.scanlator
                             summary = data.summary
