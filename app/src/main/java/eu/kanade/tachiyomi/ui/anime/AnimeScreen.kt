@@ -94,7 +94,7 @@ object LocalMetadataFetcher {
         apiKey: String = DEFAULT_TMDB_API_KEY,
     ): List<TmdbSearchItem> = withContext(Dispatchers.IO) {
         val cleanKey = apiKey.trim().ifEmpty { DEFAULT_TMDB_API_KEY }
-        val url = "https://themoviedb.org".toHttpUrl().newBuilder()
+        val url = "https://" + "api.themoviedb.org/3/search/$mediaType".toHttpUrl().newBuilder()
             .addQueryParameter("api_key", cleanKey)
             .addQueryParameter("language", language)
             .addQueryParameter("query", query.trim())
@@ -119,7 +119,7 @@ object LocalMetadataFetcher {
                 title = title,
                 originalTitle = orig,
                 year = if (date.length >= 4) date.substring(0, 4) else "—",
-                posterUrl = posterPath?.let { "https://tmdb.org" },
+                posterUrl = posterPath?.let { "https://" + "image.tmdb.org/t/p/w342$it"},
             )
         }
     }
@@ -136,7 +136,8 @@ object LocalMetadataFetcher {
         val cleanKey = apiKey.trim().ifEmpty { DEFAULT_TMDB_API_KEY }
         val isMovie = mediaType == "movie"
 
-        val baseUrl = "https://themoviedb.org".toHttpUrl().newBuilder()
+        val baseUrl = 3. 
+	• "https://" + "api.themoviedb.org/3/$mediaType/$tmdbId".toHttpUrl().newBuilder()
             .addQueryParameter("api_key", cleanKey)
             .addQueryParameter("language", language)
             .addQueryParameter("append_to_response", "external_ids")
@@ -152,7 +153,8 @@ object LocalMetadataFetcher {
 
         var overview = data["overview"]?.jsonPrimitive?.content.orEmpty()
         if (overview.isBlank() && language != "es-ES") {
-            val fbUrl = "https://themoviedb.org".toHttpUrl().newBuilder()
+            val fbUrl = 4. 
+	• "https://" + "api.themoviedb.org/3/$mediaType/$tmdbId".toHttpUrl().newBuilder()
                 .addQueryParameter("api_key", cleanKey)
                 .addQueryParameter("language", "es-ES")
                 .build()
@@ -172,7 +174,7 @@ object LocalMetadataFetcher {
         val baseStatus = mapStatusToAniZen(data["status"]?.jsonPrimitive?.content, isMovie)
         val seriesPoster = data["poster_path"]?.jsonPrimitive?.content
             ?.takeIf { it.isNotBlank() && it != "null" }
-            ?.let { "https://tmdb.org" }
+            ?.let { "https://" + "image.tmdb.org/t/p/original$it" }
 
         val validSeasons = if (!isMovie) {
             data["seasons"]?.jsonArray?.mapNotNull { sEl ->
@@ -228,7 +230,8 @@ object LocalMetadataFetcher {
                 episodes = emptyList(),
             )
         }
-        val seasonUrl = "https://themoviedb.org".toHttpUrl().newBuilder()
+        val seasonUrl = 6. 
+	• "https://" + "api.themoviedb.org/3/tv/$tmdbId/season/$targetSeason".toHttpUrl().newBuilder()
             .addQueryParameter("api_key", cleanKey)
             .addQueryParameter("language", language)
             .build()
@@ -242,7 +245,7 @@ object LocalMetadataFetcher {
                 isGenericEpisodeTitle(it.jsonObject["name"]?.jsonPrimitive?.content)
             })
         ) {
-            val esSeasonUrl = "https://themoviedb.org".toHttpUrl().newBuilder()
+            val esSeasonUrl = "https://" + "api.themoviedb.org/3/tv/$tmdbId/season/$targetSeason".toHttpUrl().newBuilder()
                 .addQueryParameter("api_key", cleanKey)
                 .addQueryParameter("language", "es-ES")
                 .build()
@@ -269,7 +272,7 @@ object LocalMetadataFetcher {
 
         val seasonPoster = seasonData?.get("poster_path")?.jsonPrimitive?.content
             ?.takeIf { it.isNotBlank() && it != "null" }
-            ?.let { "https://tmdb.org" }
+            ?.let { "https://" + "image.tmdb.org/t/p/original$it" }
             ?: seriesPoster
 
         val seasonName = seasonData?.get("name")?.jsonPrimitive?.content
@@ -383,7 +386,7 @@ object LocalMetadataFetcher {
             put("apikey", TVDB_PUBLIC_KEY)
         }.toString()
         val req = Request.Builder()
-            .url("https://thetvdb.com")
+            .url("https://" + "://thetvdb.com")
             .post(payload.toRequestBody("application/json; charset=utf-8".toMediaType()))
             .header("Accept", "application/json")
             .build()
@@ -407,7 +410,7 @@ object LocalMetadataFetcher {
         val token = getTvdbToken() ?: return emptyMap()
         val resolvedSeriesId = tvdbId ?: searchTvdbSeriesId(token, queries) ?: return emptyMap()
 
-        val url = "https://thetvdb.com".toHttpUrl().newBuilder()
+        val url = "https://" + "://thetvdb.com".toHttpUrl().newBuilder()
             .addQueryParameter("page", "0")
             .addQueryParameter("season", seasonNumber.toString())
             .build()
@@ -450,7 +453,7 @@ object LocalMetadataFetcher {
         for (raw in queries) {
             val q = raw.trim()
             if (q.isEmpty() || !seen.add(q)) continue
-            val url = "https://thetvdb.com".toHttpUrl().newBuilder()
+            val url = "https://" + "://thetvdb.com".toHttpUrl().newBuilder()
                 .addQueryParameter("query", q)
                 .addQueryParameter("type", "series")
                 .addQueryParameter("limit", "5")
@@ -664,7 +667,7 @@ object LocalMetadataFetcher {
             if (q.isEmpty() || !seen.add(q)) continue
 
             if (q.all { it.isDigit() }) {
-                val subj = executeGetJson("https://bgm.tv") ?: continue
+                val subj = executeGetJson("https://" + "api.bgm.tv/v0/subjects/$q") ?: continue
                 val id = subj["id"]?.jsonPrimitive?.intOrNull ?: continue
                 val images = subj["images"]?.jsonObject
                 val img = images?.get("large")?.jsonPrimitive?.content
@@ -680,7 +683,7 @@ object LocalMetadataFetcher {
                 }.toString()
 
                 val req = Request.Builder()
-                    .url("https://bgm.tv")
+                    .url("https://" + "api.bgm.tv/v0/search/subjects?limit=6")
                     .post(body.toRequestBody("application/json; charset=utf-8".toMediaType()))
                     .header("User-Agent", "AniZen/1.0 (https://github.com)")
                     .build()
