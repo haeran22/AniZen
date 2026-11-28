@@ -37,6 +37,8 @@ import kotlin.math.max
 object LocalMetadataFetcher {
 
     const val DEFAULT_TMDB_API_KEY = "1bde811060837749f3097f353c9b3a85"
+    private const val TVDB_PUBLIC_KEY = "5476e702-85aa-45fd-a8da-e74df3840baf"
+    private var cachedTvdbToken: String? = null
 
     data class TmdbSearchItem(
         val id: Int,
@@ -67,6 +69,12 @@ object LocalMetadataFetcher {
         val seasons: List<TmdbSeasonInfo>,
         val selectedSeason: Int,
         val episodes: List<EpisodeDetails>,
+    )
+
+    private data class TvdbEpisodeInfo(
+        val name: String?,
+        val overview: String?,
+        val aired: String?,
     )
 
     private val client by lazy { Injekt.get<NetworkHelper>().client }
@@ -123,6 +131,7 @@ object LocalMetadataFetcher {
         seasonNumber: Int?,
         manualBangumiQuery: String? = null,
         apiKey: String = DEFAULT_TMDB_API_KEY,
+        preferTvdbEpisodes: Boolean = true,
     ): ResolvedMetadata? = withContext(Dispatchers.IO) {
         val cleanKey = apiKey.trim().ifEmpty { DEFAULT_TMDB_API_KEY }
         val isMovie = mediaType == "movie"
@@ -130,9 +139,11 @@ object LocalMetadataFetcher {
         val baseUrl = "https://api.themoviedb.org/3/$mediaType/$tmdbId".toHttpUrl().newBuilder()
             .addQueryParameter("api_key", cleanKey)
             .addQueryParameter("language", language)
+            .addQueryParameter("append_to_response", "external_ids")
             .build()
         val data = executeGetJson(baseUrl.toString()) ?: return@withContext null
 
+        val tvdbId = data["external_ids"]?.jsonObject?.get("tvdb_id")?.jsonPrimitive?.intOrNull
         val esTitle = data[if (isMovie) "title" else "name"]?.jsonPrimitive?.content.orEmpty()
         val origTitle = data[if (isMovie) "original_title" else "original_name"]?.jsonPrimitive?.content.orEmpty()
         val genres = data["genres"]?.jsonArray?.mapNotNull {
@@ -229,7 +240,7 @@ object LocalMetadataFetcher {
         val rawEpArray = seasonData?.get("episodes")?.jsonArray.orEmpty()
 
         if (language != "es-ES" && (seasonOverview.isBlank() || rawEpArray.any {
-                it.jsonObject["name"]?.jsonPrimitive?.content.isNullOrBlank()
+                isGenericEpisodeTitle(it.jsonObject["name"]?.jsonPrimitive?.content)
             })
         ) {
             val esSeasonUrl = "https://api.themoviedb.org/3/tv/$tmdbId/season/$targetSeason".toHttpUrl().newBuilder()
@@ -241,6 +252,20 @@ object LocalMetadataFetcher {
                 seasonOverview = esSeasonData?.get("overview")?.jsonPrimitive?.content.orEmpty()
             }
             fallbackEpisodes = esSeasonData?.get("episodes")?.jsonArray?.map { it.jsonObject }.orEmpty()
+        }
+
+        val needsTvdb = preferTvdbEpisodes || rawEpArray.isEmpty() || rawEpArray.any { epEl ->
+            val primaryName = epEl.jsonObject["name"]?.jsonPrimitive?.content
+            isGenericEpisodeTitle(primaryName)
+        }
+        val tvdbEpisodesMap = if (needsTvdb) {
+            fetchTvdbEpisodesSpanish(
+                tvdbId = tvdbId,
+                queries = listOf(esTitle, origTitle, baseRomaji),
+                seasonNumber = targetSeason,
+            )
+        } else {
+            emptyMap()
         }
 
         val seasonPoster = seasonData?.get("poster_path")?.jsonPrimitive?.content
@@ -284,24 +309,49 @@ object LocalMetadataFetcher {
         }
         val bgmHit = searchBangumiCover(bgmQueries)
 
-        val episodesList = rawEpArray.mapIndexedNotNull { idx, epEl ->
-            val epObj = epEl.jsonObject
-            val epNum = epObj["episode_number"]?.jsonPrimitive?.intOrNull ?: return@mapIndexedNotNull null
-            val fbObj = fallbackEpisodes.getOrNull(idx)
-            val epTitle = epObj["name"]?.jsonPrimitive?.content?.takeIf { it.isNotBlank() }
-                ?: fbObj?.get("name")?.jsonPrimitive?.content?.takeIf { it.isNotBlank() }
-                ?: "Episodio $epNum"
-            val airDate = epObj["air_date"]?.jsonPrimitive?.content
-                ?.takeIf { it.isNotBlank() && it != "null" }
-                ?.let { "${it}T00:00:00" }
+        val episodesList = if (rawEpArray.isNotEmpty()) {
+            rawEpArray.mapIndexedNotNull { idx, epEl ->
+                val epObj = epEl.jsonObject
+                val epNum = epObj["episode_number"]?.jsonPrimitive?.intOrNull ?: return@mapIndexedNotNull null
+                val fbObj = fallbackEpisodes.getOrNull(idx)
+                val tmdbTitle = epObj["name"]?.jsonPrimitive?.content?.takeIf { !isGenericEpisodeTitle(it) }
+                    ?: fbObj?.get("name")?.jsonPrimitive?.content?.takeIf { !isGenericEpisodeTitle(it) }
+                val tvdbInfo = tvdbEpisodesMap[epNum]
+                val tvdbTitle = tvdbInfo?.name?.takeIf { !isGenericEpisodeTitle(it) }
 
-            EpisodeDetails(
-                episode_number = epNum.toFloat(),
-                name = "Episodio $epNum - $epTitle",
-                season = targetSeason,
-                date_upload = airDate,
-                summary = null,
-            )
+                val finalTitle = if (preferTvdbEpisodes) {
+                    tvdbTitle ?: tmdbTitle ?: "Episodio $epNum"
+                } else {
+                    tmdbTitle ?: tvdbTitle ?: "Episodio $epNum"
+                }
+
+                val tmdbSummary = epObj["overview"]?.jsonPrimitive?.content?.takeIf { it.isNotBlank() }
+                    ?: fbObj?.get("overview")?.jsonPrimitive?.content?.takeIf { it.isNotBlank() }
+                val finalSummary = tvdbInfo?.overview?.takeIf { it.isNotBlank() } ?: tmdbSummary
+
+                val airDate = epObj["air_date"]?.jsonPrimitive?.content
+                    ?.takeIf { it.isNotBlank() && it != "null" }
+                    ?.let { "${it}T00:00:00" }
+                    ?: tvdbInfo?.aired?.takeIf { it.isNotBlank() }?.let { "${it}T00:00:00" }
+
+                EpisodeDetails(
+                    episode_number = epNum.toFloat(),
+                    name = finalTitle,
+                    season = targetSeason,
+                    date_upload = airDate,
+                    summary = finalSummary,
+                )
+            }
+        } else {
+            tvdbEpisodesMap.entries.sortedBy { it.key }.map { (epNum, info) ->
+                EpisodeDetails(
+                    episode_number = epNum.toFloat(),
+                    name = info.name?.takeIf { !isGenericEpisodeTitle(it) } ?: "Episodio $epNum",
+                    season = targetSeason,
+                    date_upload = info.aired?.takeIf { it.isNotBlank() }?.let { "${it}T00:00:00" },
+                    summary = info.overview?.takeIf { it.isNotBlank() },
+                )
+            }
         }
 
         ResolvedMetadata(
@@ -319,6 +369,111 @@ object LocalMetadataFetcher {
             selectedSeason = targetSeason,
             episodes = episodesList,
         )
+    }
+
+    private fun isGenericEpisodeTitle(title: String?): Boolean {
+        if (title.isNullOrBlank()) return true
+        val trimmed = title.trim()
+        return Regex("""(?i)^(episodio|episode|cap[ií]tulo|ep\.?)\s*\d+$""").matches(trimmed) ||
+            trimmed.equals("TBA", ignoreCase = true) ||
+            trimmed.equals("To Be Announced", ignoreCase = true)
+    }
+
+    private fun getTvdbToken(): String? {
+        cachedTvdbToken?.let { return it }
+        val payload = buildJsonObject {
+            put("apikey", TVDB_PUBLIC_KEY)
+        }.toString()
+        val req = Request.Builder()
+            .url("https://api4.thetvdb.com/v4/login")
+            .post(payload.toRequestBody("application/json; charset=utf-8".toMediaType()))
+            .header("Accept", "application/json")
+            .build()
+        val respJson = runCatching {
+            client.newCall(req).execute().use { resp ->
+                if (!resp.isSuccessful) null else json.parseToJsonElement(resp.body.string()).jsonObject
+            }
+        }.getOrNull() ?: return null
+        val token = respJson["data"]?.jsonObject?.get("token")?.jsonPrimitive?.content?.takeIf { it.isNotBlank() }
+        if (token != null) {
+            cachedTvdbToken = token
+        }
+        return token
+    }
+
+    private fun fetchTvdbEpisodesSpanish(
+        tvdbId: Int?,
+        queries: List<String>,
+        seasonNumber: Int,
+    ): Map<Int, TvdbEpisodeInfo> {
+        val token = getTvdbToken() ?: return emptyMap()
+        val resolvedSeriesId = tvdbId ?: searchTvdbSeriesId(token, queries) ?: return emptyMap()
+
+        val url = "https://api4.thetvdb.com/v4/series/$resolvedSeriesId/episodes/official/spa".toHttpUrl().newBuilder()
+            .addQueryParameter("page", "0")
+            .addQueryParameter("season", seasonNumber.toString())
+            .build()
+        val req = Request.Builder()
+            .url(url)
+            .header("Authorization", "Bearer $token")
+            .header("Accept", "application/json")
+            .build()
+        val respJson = runCatching {
+            client.newCall(req).execute().use { resp ->
+                if (resp.code == 401) {
+                    cachedTvdbToken = null
+                }
+                if (!resp.isSuccessful) null else json.parseToJsonElement(resp.body.string()).jsonObject
+            }
+        }.getOrNull() ?: return emptyMap()
+
+        val episodesArray = respJson["data"]?.jsonObject?.get("episodes")?.jsonArray
+            ?: respJson["data"]?.jsonArray
+            ?: return emptyMap()
+
+        val result = mutableMapOf<Int, TvdbEpisodeInfo>()
+        for (el in episodesArray) {
+            val obj = el.jsonObject
+            val sNum = obj["seasonNumber"]?.jsonPrimitive?.intOrNull ?: seasonNumber
+            if (sNum != seasonNumber) continue
+            val epNum = obj["number"]?.jsonPrimitive?.intOrNull ?: continue
+            val name = obj["name"]?.jsonPrimitive?.content?.takeIf { it.isNotBlank() && it != "null" }
+            val overview = obj["overview"]?.jsonPrimitive?.content?.takeIf { it.isNotBlank() && it != "null" }
+            val aired = obj["aired"]?.jsonPrimitive?.content?.takeIf { it.isNotBlank() && it != "null" }
+            if (name != null || overview != null) {
+                result[epNum] = TvdbEpisodeInfo(name = name, overview = overview, aired = aired)
+            }
+        }
+        return result
+    }
+
+    private fun searchTvdbSeriesId(token: String, queries: List<String>): Int? {
+        val seen = mutableSetOf<String>()
+        for (raw in queries) {
+            val q = raw.trim()
+            if (q.isEmpty() || !seen.add(q)) continue
+            val url = "https://api4.thetvdb.com/v4/search".toHttpUrl().newBuilder()
+                .addQueryParameter("query", q)
+                .addQueryParameter("type", "series")
+                .addQueryParameter("limit", "5")
+                .build()
+            val req = Request.Builder()
+                .url(url)
+                .header("Authorization", "Bearer $token")
+                .header("Accept", "application/json")
+                .build()
+            val respJson = runCatching {
+                client.newCall(req).execute().use { resp ->
+                    if (!resp.isSuccessful) null else json.parseToJsonElement(resp.body.string()).jsonObject
+                }
+            }.getOrNull() ?: continue
+
+            val firstHit = respJson["data"]?.jsonArray?.firstOrNull()?.jsonObject ?: continue
+            val tvdbId = firstHit["tvdb_id"]?.jsonPrimitive?.content?.toIntOrNull()
+                ?: firstHit["id"]?.jsonPrimitive?.content?.substringAfterLast("-")?.toIntOrNull()
+            if (tvdbId != null) return tvdbId
+        }
+        return null
     }
 
     suspend fun saveFilesToAnimeDir(
@@ -397,8 +552,8 @@ object LocalMetadataFetcher {
 
     private fun fetchAniListMedia(queries: List<String>): AniListNode? {
         val gql = """
-            query (${'$'}search: String) {
-              Media(search: ${'$'}search, type: ANIME) {
+            query (\${'$'}search: String) {
+              Media(search: \${'$'}search, type: ANIME) {
                 title { romaji native }
                 studios(isMain: true) { nodes { name } }
                 relations {
