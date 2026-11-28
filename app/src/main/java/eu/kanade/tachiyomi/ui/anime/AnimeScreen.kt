@@ -407,7 +407,7 @@ val esSeasonUrl = ("https://" + "api.themoviedb.org/3/tv/$tmdbId/season/$targetS
         val token = getTvdbToken() ?: return emptyMap()
         val resolvedSeriesId = tvdbId ?: searchTvdbSeriesId(token, queries) ?: return emptyMap()
 
-        val url = "https://" + "://thetvdb.com".toHttpUrl().newBuilder()
+        val url = ("https://" + "://thetvdb.com").toHttpUrl().newBuilder()
             .addQueryParameter("page", "0")
             .addQueryParameter("season", seasonNumber.toString())
             .build()
@@ -450,7 +450,7 @@ val esSeasonUrl = ("https://" + "api.themoviedb.org/3/tv/$tmdbId/season/$targetS
         for (raw in queries) {
             val q = raw.trim()
             if (q.isEmpty() || !seen.add(q)) continue
-            val url = "https://" + "://thetvdb.com".toHttpUrl().newBuilder()
+            val url = ("https://" + "://thetvdb.com").toHttpUrl().newBuilder()
                 .addQueryParameter("query", q)
                 .addQueryParameter("type", "series")
                 .addQueryParameter("limit", "5")
