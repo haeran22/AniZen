@@ -128,7 +128,7 @@ fun EditAnimeDialog(
                     .fillMaxWidth()
                     .verticalScroll(rememberScrollState()),
             ) {
-                AndroidView(
+                                AndroidView(
                     factory = { factoryContext ->
                         EditAnimeDialogBinding.inflate(LayoutInflater.from(factoryContext))
                             .also { binding = it }
@@ -147,13 +147,14 @@ fun EditAnimeDialog(
                             }
                             .root
                     },
-                               loadCover(anime, currentBinding)
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
         },
     )
-}
-)
 
     if (showTrackerSelectionDialogue.value) {
+
         TrackerSelectDialog(
             tracks = tracks.value,
             onDismissRequest = { showTrackerSelectionDialogue.value = false },
