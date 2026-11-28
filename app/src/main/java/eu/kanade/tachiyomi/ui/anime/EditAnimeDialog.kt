@@ -196,7 +196,7 @@ fun EditAnimeDialog(
             },
         )
     }
-
+}
 
 
 @Composable
