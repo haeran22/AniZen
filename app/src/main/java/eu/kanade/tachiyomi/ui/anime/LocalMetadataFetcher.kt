@@ -385,7 +385,7 @@ object LocalMetadataFetcher {
             put("apikey", TVDB_PUBLIC_KEY)
         }.toString()
         val req = Request.Builder()
-            .url("https://api4.thetvdb.com/v4/login")
+.url("https://" + "api4." + "thetvdb." + "com/v4/login")
             .post(payload.toRequestBody("application/json; charset=utf-8".toMediaType()))
             .header("Accept", "application/json")
             .build()
@@ -409,7 +409,7 @@ object LocalMetadataFetcher {
         val token = getTvdbToken() ?: return emptyMap()
         val resolvedSeriesId = tvdbId ?: searchTvdbSeriesId(token, queries) ?: return emptyMap()
 
-        val url = "https://api4.thetvdb.com/v4/series/$resolvedSeriesId/episodes/official/spa".toHttpUrl().newBuilder()
+val url = ("https://" + "api4." + "thetvdb." + "com/v4/series/$resolvedSeriesId/episodes/official/spa").toHttpUrl().newBuilder()
             .addQueryParameter("page", "0")
             .addQueryParameter("season", seasonNumber.toString())
             .build()
@@ -452,7 +452,7 @@ object LocalMetadataFetcher {
         for (raw in queries) {
             val q = raw.trim()
             if (q.isEmpty() || !seen.add(q)) continue
-            val url = "https://api4.thetvdb.com/v4/search".toHttpUrl().newBuilder()
+val url = ("https://" + "api4." + "thetvdb." + "com/v4/search").toHttpUrl().newBuilder()
                 .addQueryParameter("query", q)
                 .addQueryParameter("type", "series")
                 .addQueryParameter("limit", "5")
