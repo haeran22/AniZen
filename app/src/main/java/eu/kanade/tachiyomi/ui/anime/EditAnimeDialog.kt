@@ -170,7 +170,7 @@ fun EditAnimeDialog(
             anime = anime,
             onDismissRequest = { showLocalMetadataDialogue.value = false },
             onApplyMetadata = { title, studio, description, genres, status, coverUrl ->
-                val currentBinding = binding ?: return@LocalMetadataSearchDialog
+                              val currentBinding = binding ?: return@LocalMetadataSearchDialog
                 setTextIfNotBlank(currentBinding.title::setText, title)
                 setTextIfNotBlank(currentBinding.mangaAuthor::setText, studio)
                 setTextIfNotBlank(currentBinding.mangaArtist::setText, studio)
@@ -191,15 +191,12 @@ fun EditAnimeDialog(
                 if (spinnerPos > 0) {
                     currentBinding.status.setSelection(spinnerPos)
                 }
-                if (!coverUrl.isNullOrBlank()) {
-                    currentBinding.mangaCover.load(coverUrl) {
-                        transformations(RoundedCornersTransformation(4.dpToPx.toFloat()))
-                    }
-                }
+                loadCover(anime, currentBinding)
             },
         )
     }
 }
+
 
 @Composable
 private fun TrackerSelectDialog(
