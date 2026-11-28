@@ -166,15 +166,15 @@ fun EditAnimeDialog(
         )
     }
 
-     if (showLocalMetadataDialogue.value) {
+    if (showLocalMetadataDialogue.value) {
         LocalMetadataSearchDialog(
             anime = anime,
             onDismissRequest = { showLocalMetadataDialogue.value = false },
-            onApplyMetadata = { title: String, studio: String, description: String, genres: List<String>, status: Int, _: String? ->
+            onApplyMetadata = { title, author, artist, description, genres, status, coverSaved ->
                 val currentBinding = binding ?: return@LocalMetadataSearchDialog
                 setTextIfNotBlank(currentBinding.title::setText, title)
-                setTextIfNotBlank(currentBinding.mangaAuthor::setText, studio)
-                setTextIfNotBlank(currentBinding.mangaArtist::setText, studio)
+                setTextIfNotBlank(currentBinding.mangaAuthor::setText, author)
+                setTextIfNotBlank(currentBinding.mangaArtist::setText, artist)
                 setTextIfNotBlank(currentBinding.mangaDescription::setText, description)
                 if (genres.isNotEmpty()) {
                     currentBinding.mangaGenresTags.setChips(genres.dropBlank(), scope)
@@ -192,11 +192,13 @@ fun EditAnimeDialog(
                 if (spinnerPos > 0) {
                     currentBinding.status.setSelection(spinnerPos)
                 }
-                loadCover(anime, currentBinding)
+                if (coverSaved) {
+                    loadCover(anime, currentBinding)
+                }
             },
         )
     }
-}
+
 
 
 @Composable
