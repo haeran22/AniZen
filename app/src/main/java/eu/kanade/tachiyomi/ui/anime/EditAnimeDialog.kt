@@ -165,12 +165,12 @@ fun EditAnimeDialog(
         )
     }
 
-    if (showLocalMetadataDialogue.value) {
+     if (showLocalMetadataDialogue.value) {
         LocalMetadataSearchDialog(
             anime = anime,
             onDismissRequest = { showLocalMetadataDialogue.value = false },
-            onApplyMetadata = { title, studio, description, genres, status, coverUrl ->
-                              val currentBinding = binding ?: return@LocalMetadataSearchDialog
+            onApplyMetadata = { title: String, studio: String, description: String, genres: List<String>, status: Int, _: String? ->
+                val currentBinding = binding ?: return@LocalMetadataSearchDialog
                 setTextIfNotBlank(currentBinding.title::setText, title)
                 setTextIfNotBlank(currentBinding.mangaAuthor::setText, studio)
                 setTextIfNotBlank(currentBinding.mangaArtist::setText, studio)
@@ -195,7 +195,7 @@ fun EditAnimeDialog(
             },
         )
     }
-}
+
 
 
 @Composable
