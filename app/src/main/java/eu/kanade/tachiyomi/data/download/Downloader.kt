@@ -1202,7 +1202,17 @@ class Downloader(
         val outFile = File(sandboxDir, "$filename.mkv")
         outFile.delete()
 
-        val httpClient = (download.source as? HttpSource)?.client ?: networkHelper.downloadClient
+        val baseClient = (download.source as? HttpSource)?.client
+        val sourceName = download.source?.name.orEmpty().lowercase()
+        val httpClient = when {
+            // Anizone sin el rate-limiter de la extensión (descarga en ~9 seg)
+            "anizone" in sourceName -> networkHelper.downloadClient
+            // TioAnime / Voe con sus cookies/sesión pero usando el dispatcher sin límite de 64 hilos
+            baseClient != null -> baseClient.newBuilder()
+                .dispatcher(networkHelper.downloadClient.dispatcher)
+                .build()
+            else -> networkHelper.downloadClient
+        }
         val headers = getHeaders(video)
 
         suspend fun fetchBytes(url: String): ByteArray = withContext(Dispatchers.IO) {
