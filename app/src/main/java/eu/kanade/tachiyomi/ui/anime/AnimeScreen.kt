@@ -94,7 +94,7 @@ object LocalMetadataFetcher {
         apiKey: String = DEFAULT_TMDB_API_KEY,
     ): List<TmdbSearchItem> = withContext(Dispatchers.IO) {
         val cleanKey = apiKey.trim().ifEmpty { DEFAULT_TMDB_API_KEY }
-        val url = "https://" + "api.themoviedb.org/3/search/$mediaType".toHttpUrl().newBuilder()
+        val url = ("https://" + "api.themoviedb.org/3/search/$mediaType").toHttpUrl().newBuilder()
             .addQueryParameter("api_key", cleanKey)
             .addQueryParameter("language", language)
             .addQueryParameter("query", query.trim())
@@ -136,8 +136,7 @@ object LocalMetadataFetcher {
         val cleanKey = apiKey.trim().ifEmpty { DEFAULT_TMDB_API_KEY }
         val isMovie = mediaType == "movie"
 
-        val baseUrl = 3. 
-	• "https://" + "api.themoviedb.org/3/$mediaType/$tmdbId".toHttpUrl().newBuilder()
+        val baseUrl = ("https://" + "api.themoviedb.org/3/$mediaType/$tmdbId").toHttpUrl().newBuilder()
             .addQueryParameter("api_key", cleanKey)
             .addQueryParameter("language", language)
             .addQueryParameter("append_to_response", "external_ids")
@@ -153,8 +152,7 @@ object LocalMetadataFetcher {
 
         var overview = data["overview"]?.jsonPrimitive?.content.orEmpty()
         if (overview.isBlank() && language != "es-ES") {
-            val fbUrl = 4. 
-	• "https://" + "api.themoviedb.org/3/$mediaType/$tmdbId".toHttpUrl().newBuilder()
+           val fbUrl = ("https://" + "api.themoviedb.org/3/$mediaType/$tmdbId").toHttpUrl().newBuilder()
                 .addQueryParameter("api_key", cleanKey)
                 .addQueryParameter("language", "es-ES")
                 .build()
@@ -230,8 +228,7 @@ object LocalMetadataFetcher {
                 episodes = emptyList(),
             )
         }
-        val seasonUrl = 6. 
-	• "https://" + "api.themoviedb.org/3/tv/$tmdbId/season/$targetSeason".toHttpUrl().newBuilder()
+       val seasonUrl = ("https://" + "api.themoviedb.org/3/tv/$tmdbId/season/$targetSeason").toHttpUrl().newBuilder()
             .addQueryParameter("api_key", cleanKey)
             .addQueryParameter("language", language)
             .build()
@@ -245,7 +242,7 @@ object LocalMetadataFetcher {
                 isGenericEpisodeTitle(it.jsonObject["name"]?.jsonPrimitive?.content)
             })
         ) {
-            val esSeasonUrl = "https://" + "api.themoviedb.org/3/tv/$tmdbId/season/$targetSeason".toHttpUrl().newBuilder()
+val esSeasonUrl = ("https://" + "api.themoviedb.org/3/tv/$tmdbId/season/$targetSeason").toHttpUrl().newBuilder()
                 .addQueryParameter("api_key", cleanKey)
                 .addQueryParameter("language", "es-ES")
                 .build()
