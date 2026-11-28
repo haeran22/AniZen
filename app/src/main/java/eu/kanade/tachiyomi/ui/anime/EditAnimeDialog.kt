@@ -81,6 +81,7 @@ fun EditAnimeDialog(
         mutableStateOf<EditAnimeDialogBinding?>(null)
     }
     val showTrackerSelectionDialogue = remember { mutableStateOf(false) }
+    val showLocalMetadataDialogue = remember { mutableStateOf(false) }
     val getTracks = remember { Injekt.get<GetTracks>() }
     val trackerManager = remember { Injekt.get<TrackerManager>() }
     val tracks = remember { mutableStateOf(emptyList<Pair<Track, Tracker>>()) }
@@ -132,7 +133,17 @@ fun EditAnimeDialog(
                         EditAnimeDialogBinding.inflate(LayoutInflater.from(factoryContext))
                             .also { binding = it }
                             .apply {
-                                onViewCreated(anime, factoryContext, this, scope, getTracks, trackerManager, tracks, showTrackerSelectionDialogue)
+                                onViewCreated(
+                                    anime = anime,
+                                    context = factoryContext,
+                                    binding = this,
+                                    scope = scope,
+                                    getTracks = getTracks,
+                                    trackerManager = trackerManager,
+                                    tracks = tracks,
+                                    showTrackerSelectionDialogue = showTrackerSelectionDialogue,
+                                    showLocalMetadataDialogue = showLocalMetadataDialogue,
+                                )
                             }
                             .root
                     },
@@ -149,6 +160,41 @@ fun EditAnimeDialog(
             onTrackerSelect = { tracker, track ->
                 scope.launch {
                     autofillFromTracker(binding!!, track, tracker)
+                }
+            },
+        )
+    }
+
+    if (showLocalMetadataDialogue.value) {
+        LocalMetadataSearchDialog(
+            anime = anime,
+            onDismissRequest = { showLocalMetadataDialogue.value = false },
+            onApplyMetadata = { title, studio, description, genres, status, coverUrl ->
+                val currentBinding = binding ?: return@LocalMetadataSearchDialog
+                setTextIfNotBlank(currentBinding.title::setText, title)
+                setTextIfNotBlank(currentBinding.mangaAuthor::setText, studio)
+                setTextIfNotBlank(currentBinding.mangaArtist::setText, studio)
+                setTextIfNotBlank(currentBinding.mangaDescription::setText, description)
+                if (genres.isNotEmpty()) {
+                    currentBinding.mangaGenresTags.setChips(genres.dropBlank(), scope)
+                }
+                val spinnerPos = when (status) {
+                    SAnime.ONGOING -> 1
+                    SAnime.COMPLETED -> 2
+                    SAnime.LICENSED -> 3
+                    SAnime.PUBLISHING_FINISHED, 61 -> 4
+                    SAnime.CANCELLED, 62 -> 5
+                    SAnime.ON_HIATUS, 63 -> 6
+                    SAnime.UPCOMING, 64 -> 7
+                    else -> 0
+                }
+                if (spinnerPos > 0) {
+                    currentBinding.status.setSelection(spinnerPos)
+                }
+                if (!coverUrl.isNullOrBlank()) {
+                    currentBinding.mangaCover.load(coverUrl) {
+                        transformations(RoundedCornersTransformation(4.dpToPx.toFloat()))
+                    }
                 }
             },
         )
@@ -205,6 +251,7 @@ private fun onViewCreated(
     trackerManager: TrackerManager,
     tracks: MutableState<List<Pair<Track, Tracker>>>,
     showTrackerSelectionDialogue: MutableState<Boolean>,
+    showLocalMetadataDialogue: MutableState<Boolean>,
 ) {
     loadCover(anime, binding)
 
@@ -259,6 +306,8 @@ private fun onViewCreated(
         binding.mangaDescriptionOutline.hint = context.getString(R.string.description_hint, "").trim().removeSuffix(":").trim()
         binding.mangaDescription.setText(anime.description.orEmpty())
         binding.mangaGenresTags.setChips(anime.genre.orEmpty().dropBlank(), scope)
+
+        binding.autofillFromTracker.text = "Autocompletar (TMDB + AniList + Bangumi)"
     } else {
         if (anime.title != anime.ogTitle) {
             binding.title.append(anime.title)
@@ -303,8 +352,12 @@ private fun onViewCreated(
     // SY <--
 
     binding.autofillFromTracker.setOnClickListener {
-        scope.launch {
-            getTrackers(anime, binding, context, getTracks, trackerManager, tracks, showTrackerSelectionDialogue)
+        if (anime.isLocal()) {
+            showLocalMetadataDialogue.value = true
+        } else {
+            scope.launch {
+                getTrackers(anime, binding, context, getTracks, trackerManager, tracks, showTrackerSelectionDialogue)
+            }
         }
     }
 }
